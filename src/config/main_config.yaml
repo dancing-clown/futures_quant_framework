@@ -1,0 +1,66 @@
+# 项目基础配置
+project:
+  name: "期货行情多源整合框架"
+  version: "1.0.0"
+  author: "Your Name"  # 替换为你的名字
+  data_dir: "../data"  # 数据目录相对路径
+
+# 日志配置（全链路日志，工程师重点关注）
+logger:
+  level: "INFO"        # 日志级别：DEBUG/INFO/WARNING/ERROR
+  file_path: "../logs/futures_framework.log"  # 日志文件路径
+  max_bytes: 10485760  # 单个日志文件大小：10MB
+  backup_count: 5      # 日志文件备份数量：5个
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s"
+
+# 行情源配置（多源开关，按需启用，贴合你的项目背景）
+market_sources:
+  ctp:
+    enable: true       # 是否启用CTP行情
+    host: "ctp_api_host"  # CTP行情服务器地址（替换为实际地址）
+    port: 8080         # 端口
+    broker_id: "your_broker_id"  # 期货公司BrokerID
+    investor_id: "your_investor_id"  # 投资者ID
+    subscribe_codes: ["rb2405", "ma2409"]  # 订阅合约代码
+  guangfa:
+    enable: true       # 是否启用广发环网/广期所行情
+    http_url: "https://guangfa_futures_api.com"  # HTTP接口地址
+    ws_url: "wss://guangfa_futures_ws.com"       # WebSocket接口地址
+    api_key: "your_guangfa_api_key"              # 广发API密钥
+    subscribe_exchanges: ["SHFE", "INE", "DCE", "CZCE", "GFEX"]  # 订阅交易所
+  zhengying:
+    enable: true       # 是否启用正瀛行情
+    host: "zhengying_api_host"
+    port: 9090
+    subscribe_exchanges: ["DCE", "CZCE"]  # 正瀛覆盖：大商所/郑商所
+
+# 采集策略配置
+collect:
+  mode: "async"        # 采集模式：async（异步，推荐）/sync（同步）
+  interval: 0.1        # 同步采集间隔（秒，异步无需配置）
+  retry_count: 3       # 采集失败重试次数
+  retry_interval: 1    # 重试间隔（秒）
+  timeout: 5           # 接口超时时间（秒）
+
+# 数据存储配置（多存储方案，按需启用）
+storage:
+  default: "tsdb"      # 默认存储方案：tsdb/file/redis
+  tsdb:
+    enable: true
+    type: "influxdb"   # 时序库类型：influxdb/timescaledb
+    host: "127.0.0.1"
+    port: 8086
+    database: "futures_market"
+    token: "your_influxdb_token"
+    org: "futures_org"
+  file:
+    enable: true
+    type: "parquet"    # 文件格式：parquet（推荐，压缩比高）/csv
+    save_interval: 60  # 定时保存间隔（秒）
+  redis:
+    enable: true
+    host: "127.0.0.1"
+    port: 6379
+    db: 0
+    password: ""
+    expire: 3600       # 缓存过期时间（秒）
