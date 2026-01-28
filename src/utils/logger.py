@@ -13,8 +13,10 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "main_config.yaml"
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
 
-# 确保日志目录存在
-LOG_FILE_PATH = Path(CONFIG["logger"]["file_path"])
+# 确保日志目录存在（路径相对于项目根目录）
+# 获取项目根目录（src/utils 的父目录的父目录）
+_project_root = Path(__file__).parent.parent.parent
+LOG_FILE_PATH = _project_root / CONFIG["logger"]["file_path"]
 LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def get_futures_logger(name: str = __name__) -> logging.Logger:

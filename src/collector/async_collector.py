@@ -3,6 +3,7 @@
 负责管理多个具体的行情采集器（如 ZYZmqCollector, CTPCollector），实现并发采集
 """
 import asyncio
+import threading
 from typing import List, Dict
 from src.collector.base_collector import BaseFuturesCollector
 from src.collector.zy_collector import ZYZmqCollector
@@ -57,20 +58,39 @@ class AsyncFuturesCollector(BaseFuturesCollector):
     async def run_forever(self, on_data_callback):
         """
         启动异步任务运行所有采集器
+        
+        CTP 采集器使用回调机制，数据通过回调放入队列，这里定期从队列中取数据
+        ZY ZMQ 采集器使用异步接收，需要启动异步任务
         """
         tasks = []
+        
+        # ZY ZMQ 采集器使用异步接收
         for collector in self.collectors:
             if isinstance(collector, ZYZmqCollector):
                 tasks.append(collector.api.start_receiving(collector.on_data_received))
-            # CTP 采集器通常自带回调，不需要额外的异步 loop，除非是主动轮询
         
-        # 数据分发循环
+        # CTP 采集器需要在单独线程中调用 Join() 保持连接和处理回调
+        for collector in self.collectors:
+            if isinstance(collector, CTPCollector) and collector.api and collector.api.api:
+                def run_ctp_join():
+                    try:
+                        # Join() 会阻塞，直到连接断开
+                        collector.api.join()
+                    except Exception as e:
+                        futures_logger.error(f"CTP Join 异常: {e}", exc_info=True)
+                
+                join_thread = threading.Thread(target=run_ctp_join, daemon=True)
+                join_thread.start()
+                futures_logger.info("已启动 CTP Join 线程")
+        
+        # 数据分发循环（从所有采集器的队列中取数据）
         async def dispatch_loop():
             while True:
                 data = self.collect_data()
                 if data:
                     await on_data_callback(data)
-                await asyncio.sleep(0.01)
+                # CTP 回调是同步的，需要定期检查队列
+                await asyncio.sleep(0.1)  # 100ms 检查一次
 
         tasks.append(dispatch_loop())
         await asyncio.gather(*tasks)

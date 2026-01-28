@@ -15,37 +15,56 @@ class CTPCollector(BaseFuturesCollector):
     def __init__(self, market_sources: Dict):
         super().__init__(market_sources)
         ctp_config = market_sources.get("ctp", {})
+        # 登录信息为可选（如果未提供则使用匿名登录）
+        broker_id = ctp_config.get("broker_id", "")
+        investor_id = ctp_config.get("investor_id", "")
+        password = ctp_config.get("password", "")
         self.api = CtpMarketApi(
-            broker_id=ctp_config.get("broker_id", ""),
-            investor_id=ctp_config.get("investor_id", ""),
-            password=ctp_config.get("password", ""),
             front_address=ctp_config.get("host", ""),
-            pybind_path=ctp_config.get("pybind_path")
+            pybind_path=ctp_config.get("pybind_path"),
+            subscribe_symbols=ctp_config.get("subscribe_codes", []),
+            broker_id=broker_id if broker_id else None,
+            investor_id=investor_id if investor_id else None,
+            password=password if password else None
         )
         self.subscribe_codes = ctp_config.get("subscribe_codes", [])
         self.data_queue = queue.Queue()
 
     def init_connections(self) -> bool:
-        """初始化 CTP 连接"""
-        if self.api.connect(self.on_data_received):
-            return self.api.login()
-        return False
+        """初始化 CTP 连接
+        注意：connect 方法会自动在连接成功后调用 login（通过 OnFrontConnected 回调）
+        """
+        return self.api.connect(self.on_data_received, auto_subscribe=True)
 
     def subscribe_market(self) -> bool:
-        """订阅行情"""
-        return self.api.subscribe(self.subscribe_codes)
+        """订阅行情
+        注意：如果 auto_subscribe=True，订阅会在登录成功后自动执行
+        这里主要检查订阅状态，如果还未订阅则手动订阅
+        """
+        # 如果已经登录，可以手动订阅（如果自动订阅失败）
+        if self.api.is_logged_in:
+            return self.api.subscribe(self.subscribe_codes)
+        # 否则等待自动订阅（通过 OnRspUserLogin 回调）
+        return True
 
     def collect_data(self) -> List[Dict]:
         """采集数据"""
         data_list = []
+        queue_size = self.data_queue.qsize()
+        if queue_size > 0:
+            futures_logger.debug(f"从队列中采集数据，队列大小: {queue_size}")
+        
         while not self.data_queue.empty():
             try:
                 raw_msg = self.data_queue.get_nowait()
                 std_data = DataParser.parse_raw_data(raw_msg)
                 if std_data:
+                    futures_logger.info(f"解析成功: {std_data.get('symbol', 'unknown')}, 价格: {std_data.get('last_price', 0)}")
                     data_list.append(std_data)
             except queue.Empty:
                 break
+            except Exception as e:
+                futures_logger.error(f"数据解析异常: {e}", exc_info=True)
         return data_list
 
     def close_connections(self) -> None:
@@ -54,4 +73,8 @@ class CTPCollector(BaseFuturesCollector):
 
     def on_data_received(self, raw_msg: Dict):
         """数据接收回调"""
-        self.data_queue.put(raw_msg)
+        try:
+            futures_logger.debug(f"CTP 数据接收回调: {raw_msg.get('type', 'unknown')}")
+            self.data_queue.put(raw_msg)
+        except Exception as e:
+            futures_logger.error(f"数据接收回调异常: {e}", exc_info=True)

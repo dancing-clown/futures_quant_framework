@@ -8,6 +8,9 @@ pandas>=2.1.0
 numpy>=1.26.0
 # 配置解析（yaml易读，适配复杂配置）
 PyYAML>=6.0.1
+# TOML 配置解析
+tomli>=2.0.1; python_version < "3.11"
+tomli-w>=1.0.0; python_version < "3.11"
 # CTP/C++接口Python封装
 cffi>=1.16.0
 # 时序数据库/缓存（可选，根据存储方案调整）

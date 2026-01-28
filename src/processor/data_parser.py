@@ -87,28 +87,43 @@ class DataParser:
 
     @staticmethod
     def _parse_ctp_tick(obj: CThostFtdcDepthMarketDataField) -> Dict:
-        """解析 CTP Tick"""
-        symbol = obj.InstrumentID.decode('gbk').strip()
+        """解析 CTP Tick
+        注意：pybind11 绑定的字符串属性已经是 Python str 类型，不需要 decode
+        """
+        # pybind11 返回的是 std::string，已经是 Python str，不需要 decode
+        symbol = str(obj.InstrumentID).strip() if obj.InstrumentID else ""
         # CTP UpdateTime: HH:MM:SS, UpdateMillisec: 500
-        time_str = obj.UpdateTime.decode('gbk')
-        date_str = obj.ActionDay.decode('gbk') # 业务日期
-        ms = obj.UpdateMillisec
-        dt = datetime.datetime.strptime(f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f")
+        time_str = str(obj.UpdateTime) if obj.UpdateTime else "00:00:00"
+        date_str = str(obj.ActionDay) if obj.ActionDay else ""  # 业务日期
+        ms = int(obj.UpdateMillisec) if hasattr(obj, 'UpdateMillisec') else 0
+        
+        # 解析时间
+        try:
+            if date_str and time_str:
+                dt = datetime.datetime.strptime(f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f")
+            else:
+                # 如果时间信息不完整，使用当前时间
+                dt = datetime.datetime.now()
+        except (ValueError, AttributeError) as e:
+            # 时间解析失败，使用当前时间
+            dt = datetime.datetime.now()
+        
+        exchange = str(obj.ExchangeID).strip() if obj.ExchangeID else ""
         
         return {
             "symbol": symbol,
-            "exchange": obj.ExchangeID.decode('gbk').strip(),
-            "last_price": obj.LastPrice,
-            "volume": int(obj.Volume),
-            "open_interest": float(obj.OpenInterest),
+            "exchange": exchange,
+            "last_price": float(obj.LastPrice) if obj.LastPrice else 0.0,
+            "volume": int(obj.Volume) if obj.Volume else 0,
+            "open_interest": float(obj.OpenInterest) if obj.OpenInterest else 0.0,
             "datetime": dt,
-            "bid_price_1": obj.BidPrice1,
-            "bid_volume_1": int(obj.BidVolume1),
-            "ask_price_1": obj.AskPrice1,
-            "ask_volume_1": int(obj.AskVolume1),
-            "open_price": obj.OpenPrice,
-            "high_price": obj.HighestPrice,
-            "low_price": obj.LowestPrice,
-            "pre_close": obj.PreClosePrice,
-            "pre_settlement": obj.PreSettlementPrice
+            "bid_price_1": float(obj.BidPrice1) if obj.BidPrice1 else 0.0,
+            "bid_volume_1": int(obj.BidVolume1) if obj.BidVolume1 else 0,
+            "ask_price_1": float(obj.AskPrice1) if obj.AskPrice1 else 0.0,
+            "ask_volume_1": int(obj.AskVolume1) if obj.AskVolume1 else 0,
+            "open_price": float(obj.OpenPrice) if obj.OpenPrice else 0.0,
+            "high_price": float(obj.HighestPrice) if obj.HighestPrice else 0.0,
+            "low_price": float(obj.LowestPrice) if obj.LowestPrice else 0.0,
+            "pre_close": float(obj.PreClosePrice) if obj.PreClosePrice else 0.0,
+            "pre_settlement": float(obj.PreSettlementPrice) if obj.PreSettlementPrice else 0.0
         }

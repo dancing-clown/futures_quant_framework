@@ -1,0 +1,16 @@
+# CTP SimNow 行情测试配置
+# 行情地址: 182.254.243.31:40011
+
+front_address = "tcp://182.254.243.31:40011"
+
+# 登录信息（可选，SimNow 通常支持匿名登录）
+# 如果需要认证登录，取消下面的注释并填写信息
+# broker_id = "9999"
+# investor_id = "your_investor_id"
+# password = "your_password"
+
+# 订阅合约列表（可选，也可以通过命令行参数指定）
+subscribe_symbols = ["rb2505", "au2506", "cu2505"]
+
+# 感兴趣的交易所（可选）
+interest_exchanges = ["CFFEX", "SHFE", "DCE", "INE", "CZCE", "GFEX"]

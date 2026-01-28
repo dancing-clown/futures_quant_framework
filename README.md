@@ -42,49 +42,134 @@ pip install -r requirements.txt
 
 ### CTP Pybind 编译说明
 
-由于 CTP SDK 是 C++ 编写的，项目使用了 `pybind11` 进行封装。在 Linux 环境下，需要手动编译生成 Python 模块：
+由于 CTP SDK 是 C++ 编写的，项目使用了 `pybind11` 进行封装。项目支持 **macOS** 和 **Linux** 两个平台，CMakeLists.txt 会根据当前编译环境自动选择对应的 SDK 版本（`macos/` 或 `linux/` 目录）。
+
+编译步骤：
 
 ```bash
-# 1. 安装 pybind11
-pip3 install pybind11
 
-# 2. 进入编译目录
+# 1. 进入编译目录
 cd extern_libs/ctp_pybind
 
-# 3. 编译
-mkdir build && cd build
+# 2. 编译（CMake 会自动检测平台并选择对应的 SDK）
+mkdir -p build && cd build
 # 如果 cmake 找不到 pybind11，可以手动指定路径：
 # cmake .. -Dpybind11_DIR=$(python3 -c "import pybind11; print(pybind11.get_cmake_dir())")
 cmake ..
 make
 
-# 4. 配置 Python 调用环境
+# 3. 配置 Python 调用环境
 # 方式 A：修改配置文件 (推荐)
 # 在 src/config/main_config.yaml 中设置 pybind_path 为编译输出目录
 # ctp:
 #   pybind_path: "extern_libs/ctp_pybind/build"
 
 # 方式 B：手动拷贝
-# 将生成的 ctp_pybind*.so 拷贝到项目根目录
-cp ctp_pybind*.so ../../../
+# macOS: 将生成的 ctp_pybind*.so 或 ctp_pybind*.dylib 拷贝到项目根目录
+# Linux: 将生成的 ctp_pybind*.so 拷贝到项目根目录
+cp ctp_pybind*.* ../../../
 
 # 方式 C：设置 PYTHONPATH
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
-# 5. 配置 CTP SDK 依赖路径 (Linux 必须)
-# 编译完成后，build 目录下已自动包含 libThostmduserapi_se.so
-# 确保系统加载路径包含该目录
+# 4. 配置 CTP SDK 依赖路径
+# Linux: 编译完成后，build 目录下已自动包含 libThostmduserapi_se.so
+#        确保系统加载路径包含该目录
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)
+
+# macOS: 编译完成后，build 目录下已自动包含 thostmduserapi_se
+#        macOS 通常不需要额外设置，因为使用了 @loader_path
 ```
+
+**注意**：
+
+- CMakeLists.txt 会自动根据编译环境（`APPLE` 或 `UNIX`）选择 `macos/` 或 `linux/` 目录下的 SDK
+- macOS 和 Linux 的库文件命名可能不同，但编译脚本会自动处理
+- 编译完成后，CTP SDK 的库文件会自动复制到 build 目录
 
 ## 快速运行
 
-修改配置：编辑src/config/main_config.yaml，替换行情源地址、API 密钥、数据库配置等为实际信息，开启 / 关闭所需行情源；
+### 配置说明
+
+修改配置：编辑 `src/config/main_config.yaml`，替换行情源地址、API 密钥、数据库配置等为实际信息，开启 / 关闭所需行情源。
+
+#### CTP 配置格式
+
+项目支持两种 CTP 配置格式：
+
+**1. YAML 格式（项目主配置）**
+
+在 `src/config/main_config.yaml` 中配置：
+
+```yaml
+market_sources:
+  ctp:
+    enable: true
+    host: "tcp://182.254.243.31:40011"  # SimNow 行情地址
+    broker_id: "9999"                    # 可选，未提供则使用匿名登录
+    investor_id: "your_id"               # 可选
+    password: "your_password"             # 可选
+    subscribe_codes: ["rb2505", "au2506"]
+    pybind_path: "extern_libs/ctp_pybind/build"
+```
+
+**2. TOML 格式**
+
+支持使用 TOML 格式配置文件（如 `config/ctp_config_simnow.toml`）：
+
+```toml
+front_address = "tcp://182.254.243.31:40011"
+# 登录信息（可选，如果未提供则使用匿名登录）
+# broker_id = "9999"
+# investor_id = "your_investor_id"
+# password = "your_password"
+subscribe_symbols = ["rb2505", "au2506"]
+interest_exchanges = ["CFFEX", "SHFE", "DCE", "INE", "CZCE", "GFEX"]
+```
+
+**注意**：使用匿名登录（空登录字段），某些 CTP 前置服务器允许行情接口匿名登录。如果配置文件中未提供登录信息，将自动使用匿名登录。
+
+#### CTP API 实现特性
+
+特性如下：
+
+1. **自动连接-登录-订阅流程**：
+   - 连接成功后自动登录（`OnFrontConnected` → `login()`）
+   - 登录成功后自动订阅（`OnRspUserLogin` → `subscribe()`）
+
+2. **完整的回调处理**：
+   - `OnFrontConnected`: 前置连接成功
+   - `OnRspUserLogin`: 登录响应
+   - `OnRspSubMarketData`: 订阅响应
+   - `OnRtnDepthMarketData`: 行情数据推送
+   - `OnRspError`: 错误响应
+
+### 启动项目
 
 启动项目：在项目根目录执行以下命令启动行情采集主程序：
 
 ```bash
+# 方式 1：直接运行（推荐）
 python3 src/main.py
+
+# 方式 2：使用模块方式运行
+python3 -m src.main
+
+# 方式 3：使用自定义配置文件
+python3 src/main.py -c config/ctp_config_simnow.toml
+```
+
+**注意**：请确保在项目根目录下运行，程序会自动将项目根目录添加到 Python 路径中。
+
+### 集成测试
+
+集成测试统一在 `src/main.py` 中进行。可以通过修改配置文件来测试不同的行情源：
+
+```bash
+# 使用默认配置运行
+python3 src/main.py
+
+# 或修改 src/config/main_config.yaml 后运行
 ```
 
 ## 项目结构
@@ -95,10 +180,37 @@ futures_quant_framework/
 ├── data/         # 数据存储目录（自动生成，分临时/历史/异常数据）
 ├── docs/         # 设计文档/接口文档
 ├── tests/        # 单元测试用例
+├── config/       # 配置文件目录（包含 CTP 配置示例）
+├── extern_libs/  # 外部库（CTP SDK 等）
 ├── .gitignore    # Git忽略文件
 ├── requirements.txt # 依赖清单（指定具体版本）
 └── README.md     # 项目说明文档
 ```
+
+## 测试
+
+### 单元测试
+
+项目使用 `pytest` 进行单元测试，测试文件位于 `tests/` 目录：
+
+```bash
+# 运行所有单元测试
+pytest tests/
+
+# 运行特定测试文件
+pytest tests/test_ctp_api.py
+
+# 运行特定测试用例
+pytest tests/test_ctp_api.py::test_ctp_api_initialization
+```
+
+### 集成测试
+
+集成测试统一在 `src/main.py` 中进行功能测试。通过修改配置文件来测试不同的行情源和功能：
+
+1. 修改 `src/config/main_config.yaml` 启用需要测试的行情源
+2. 运行 `python3 src/main.py` 进行集成测试
+3. 检查日志和数据输出验证功能是否正常
 
 ## 模块说明
 
