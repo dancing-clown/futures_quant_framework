@@ -4,8 +4,19 @@ project(ctp_pybind)
 set(CMAKE_CXX_STANDARD 11)
 
 # --- 查找 pybind11 ---
-# 假设用户已经安装了 pybind11 (e.g., pip install pybind11)
-find_package(pybind11 REQUIRED)
+# 优先尝试从 Python 环境中查找 pybind11
+execute_process(
+    COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
+if(NOT pybind11_DIR)
+    find_package(pybind11 REQUIRED)
+else()
+    find_package(pybind11 REQUIRED PATHS ${pybind11_DIR} NO_DEFAULT_PATH)
+endif()
 
 # --- 设置 CTP SDK 路径 ---
 set(CTP_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")

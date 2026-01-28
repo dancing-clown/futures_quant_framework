@@ -46,13 +46,15 @@ pip install -r requirements.txt
 
 ```bash
 # 1. 安装 pybind11
-pip install pybind11
+pip3 install pybind11
 
 # 2. 进入编译目录
 cd extern_libs/ctp_pybind
 
 # 3. 编译
 mkdir build && cd build
+# 如果 cmake 找不到 pybind11，可以手动指定路径：
+# cmake .. -Dpybind11_DIR=$(python3 -c "import pybind11; print(pybind11.get_cmake_dir())")
 cmake ..
 make
 
