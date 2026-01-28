@@ -17,19 +17,24 @@ logger:
 market_sources:
   ctp:
     enable: true       # 是否启用CTP行情
-    host: "ctp_api_host"  # CTP行情服务器地址（替换为实际地址）
-    port: 8080         # 端口
-    broker_id: "your_broker_id"  # 期货公司BrokerID
-    investor_id: "your_investor_id"  # 投资者ID
-    subscribe_codes: ["rb2405", "ma2409"]  # 订阅合约代码
+    host: "tcp://180.168.146.187:10131"  # CTP SimNow 行情地址
+    broker_id: "9999"
+    investor_id: "your_id"
+    password: "your_password"
+    subscribe_codes: ["rb2505", "au2506"]  # 订阅合约代码
+    pybind_path: "extern_libs/ctp_pybind/build" # ctp_pybind.so 编译输出路径
+  ZY_ZMQ:
+    enable: true       # 是否启用正瀛 ZMQ PUB 模式行情
+    dce_address: "tcp://101.133.152.163:23333" # 大商所 ZMQ 地址
+    czce_address: "tcp://101.133.152.163:23355" # 郑商所 ZMQ 地址
   guangfa:
-    enable: true       # 是否启用广发环网/广期所行情
+    enable: false       # 是否启用广发环网/广期所行情
     http_url: "https://guangfa_futures_api.com"  # HTTP接口地址
     ws_url: "wss://guangfa_futures_ws.com"       # WebSocket接口地址
     api_key: "your_guangfa_api_key"              # 广发API密钥
     subscribe_exchanges: ["SHFE", "INE", "DCE", "CZCE", "GFEX"]  # 订阅交易所
   zhengying:
-    enable: true       # 是否启用正瀛行情
+    enable: false       # 是否启用正瀛行情
     host: "zhengying_api_host"
     port: 9090
     subscribe_exchanges: ["DCE", "CZCE"]  # 正瀛覆盖：大商所/郑商所
@@ -59,8 +64,8 @@ storage:
     save_interval: 60  # 定时保存间隔（秒）
   redis:
     enable: true
-    host: "127.0.0.1"
-    port: 6379
+    host: "172.16.13.8"
+    port: 6371
     db: 0
-    password: ""
+    password: "LZy32C2kNHqsvu4Uyj"
     expire: 3600       # 缓存过期时间（秒）

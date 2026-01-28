@@ -26,3 +26,4 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+ctp-market-api/

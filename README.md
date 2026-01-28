@@ -19,14 +19,60 @@
 
 ### 基础环境
 
-Python 3.9+（推荐3.9.13，兼容所有依赖）
+Python 3.14+（当前环境已验证支持 3.14.0）
 
 ### 依赖安装
 
 克隆项目后，在项目根目录执行以下命令一键安装所有依赖：
 
 ```bash
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活虚拟环境 (macOS/Linux)
+source .venv/bin/activate
+
+# 激活虚拟环境 (Windows)
+# .venv\Scripts\activate
+
+```bash
+# 安装依赖
 pip install -r requirements.txt
+```
+
+### CTP Pybind 编译说明
+
+由于 CTP SDK 是 C++ 编写的，项目使用了 `pybind11` 进行封装。在 Linux 环境下，需要手动编译生成 Python 模块：
+
+```bash
+# 1. 安装 pybind11
+pip install pybind11
+
+# 2. 进入编译目录
+cd extern_libs/ctp_pybind
+
+# 3. 编译
+mkdir build && cd build
+cmake ..
+make
+
+# 4. 配置 Python 调用环境
+# 方式 A：修改配置文件 (推荐)
+# 在 src/config/main_config.yaml 中设置 pybind_path 为编译输出目录
+# ctp:
+#   pybind_path: "extern_libs/ctp_pybind/build"
+
+# 方式 B：手动拷贝
+# 将生成的 ctp_pybind*.so 拷贝到项目根目录
+cp ctp_pybind*.so ../../../
+
+# 方式 C：设置 PYTHONPATH
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+
+# 5. 配置 CTP SDK 依赖路径 (Linux 必须)
+# 编译完成后，build 目录下已自动包含 libThostmduserapi_se.so
+# 确保系统加载路径包含该目录
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)
 ```
 
 ## 快速运行
@@ -36,11 +82,12 @@ pip install -r requirements.txt
 启动项目：在项目根目录执行以下命令启动行情采集主程序：
 
 ```bash
-python src/main.py
+python3 src/main.py
 ```
 
 ## 项目结构
 
+```sh
 futures_quant_framework/
 ├── src/          # 核心源码（分层模块化设计）
 ├── data/         # 数据存储目录（自动生成，分临时/历史/异常数据）
@@ -49,6 +96,7 @@ futures_quant_framework/
 ├── .gitignore    # Git忽略文件
 ├── requirements.txt # 依赖清单（指定具体版本）
 └── README.md     # 项目说明文档
+```
 
 ## 模块说明
 
@@ -58,7 +106,7 @@ futures_quant_framework/
 |接口封装模块|src/api/|CTP/广发/正瀛行情接口封装|
 |行情采集模块|src/collector/|多源行情统一采集/重连/订阅|
 |数据处理模块|src/processor/|数据解析/清洗/异常检测|
-|数据存储模块|src/storage/|多方案存储（时序库/文件/Redis）|
+|数据存储模块|src/storage/|多方案存储（时序库/文件/Redis/shm）|
 |通用工具模块|src/utils/|日志/异常/时间处理/通用函数|
 |项目入口|src/main.py|配置加载/模块调度/程序启动|
 
@@ -95,4 +143,4 @@ futures_quant_framework/
 1. 运行前需修改`src/config/main_config.yaml`中的**行情源配置**（地址、API密钥、BrokerID等），替换为实际可用信息，否则会抛出`MarketSourceError`；
 2. 若暂时无实际行情源测试，可在`src/collector/async_collector.py`中实现**模拟数据采集**（生成符合`FUTURES_BASE_FIELDS`的模拟行情数据），保证框架可正常运行；
 3. 首次运行会自动生成`data/`和`logs/`目录，无需手动创建；
-4. 推荐使用Python3.9版本，避免高版本（如3.12）的依赖兼容问题。
+4. 推荐使用 Python 3.14 版本，若遇到依赖兼容问题，请确保已更新至最新的依赖版本。
