@@ -75,7 +75,7 @@ processor:
 storage:
   default: "tsdb"      # 默认存储方案：tsdb/file/redis
   tsdb:
-    enable: true
+    enable: false
     type: "influxdb"   # 时序库类型：influxdb/timescaledb
     host: "127.0.0.1"
     port: 8086
@@ -88,7 +88,7 @@ storage:
     type: "parquet"    # 文件格式：parquet（推荐，压缩比高）/csv
     save_interval: 60  # 定时保存间隔（秒）
   redis:
-    enable: true
+    enable: false
     host: "172.16.13.8"
     port: 6371
     db: 0

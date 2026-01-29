@@ -3,14 +3,14 @@
 pyzmq>=25.0.0
 # 数据处理（期货行情时间序列核心）
 pandas>=2.1.0
-numpy>=1.26.0
+# numpy>=1.26.0
 # 配置解析（yaml易读，适配复杂配置）
 PyYAML>=6.0.1
 # TOML 配置解析
 tomli>=2.0.1; python_version < "3.11"
 tomli-w>=1.0.0; python_version < "3.11"
 # CTP/C++接口Python封装
-cffi>=1.16.0
+pybind11>=3.0.1
 # 时序数据库/缓存（可选，根据存储方案调整）
 influxdb-client>=1.39.0
 redis>=5.0.1
@@ -22,4 +22,3 @@ matplotlib>=3.8.0
 # 其他工具（装饰器/数据校验）
 decorator>=5.1.1
 pydantic>=2.4.2
-pybind11>=3.0.0

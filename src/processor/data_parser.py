@@ -36,43 +36,6 @@ FUTURES_BASE_FIELDS = [
     "open_price", "high_price", "low_price", "pre_close", "pre_settlement"
 ]
 
-def _ctp_field_to_str(val, default: str = "") -> str:
-    """将 CTP 结构体中的字符串/字节字段安全转为 str（兼容 macOS/Linux 下 bytes 或 pybind char[]）。
-
-    CTP/pybind 可能返回 Python bytes、str，或 C++ char 数组的包装类型。后者走 str(val) 时
-    pybind 会按 UTF-8 解码导致 UnicodeDecodeError，故对非 str 类型优先按“原始字节”取 buffer 再 GBK 解码。
-
-    Args:
-        val: 字段值，可为 bytes、str、None 或支持 buffer 的 pybind 类型。
-        default: 为空或解码失败时的返回值。
-
-    Returns:
-        非空时去首尾空白后的字符串，否则返回 default。
-    """
-    if val is None:
-        return default
-    if isinstance(val, str):
-        return val.strip() or default
-    # 统一按“原始字节”处理：bytes 或支持 buffer 的 pybind 类型，避免走 __str__ 触发 utf-8
-    raw: bytes
-    if isinstance(val, bytes):
-        raw = val
-    else:
-        try:
-            raw = bytes(val)  # pybind char[] 等支持 buffer protocol
-        except Exception:
-            try:
-                return str(val).strip() or default
-            except UnicodeDecodeError:
-                return default
-    if not raw:
-        return default
-    try:
-        return raw.decode("gbk", errors="replace").strip() or default
-    except Exception:
-        return raw.decode("latin-1", errors="replace").strip() or default
-
-
 def _infer_exchange_from_symbol(symbol: str) -> str:
     """根据合约代码推断交易所（仅当 CTP 等源未返回 ExchangeID 时用于补全）。
 
@@ -188,16 +151,13 @@ class DataParser:
 
     @staticmethod
     def _parse_ctp_tick(obj) -> Dict:
-        """解析 CTP Tick。
-
-        兼容 pybind 返回的字符串为 str 或 bytes（如 macOS 下为 char 数组），统一安全解码为 str。
-        """
+        """解析 CTP Tick（pybind 绑定的字符串属性一般为 Python str，按需 decode）。"""
         from src.utils import futures_logger
 
         try:
-            symbol = _ctp_field_to_str(getattr(obj, "InstrumentID", None), "")
-            time_str = _ctp_field_to_str(getattr(obj, "UpdateTime", None), "00:00:00") or "00:00:00"
-            date_str = _ctp_field_to_str(getattr(obj, "ActionDay", None), "")
+            symbol = str(obj.InstrumentID).strip() if hasattr(obj, "InstrumentID") and obj.InstrumentID else ""
+            time_str = str(obj.UpdateTime) if hasattr(obj, "UpdateTime") and obj.UpdateTime else "00:00:00"
+            date_str = str(obj.ActionDay) if hasattr(obj, "ActionDay") and obj.ActionDay else ""
             ms = int(obj.UpdateMillisec) if hasattr(obj, "UpdateMillisec") else 0
 
             try:
@@ -211,30 +171,47 @@ class DataParser:
                 futures_logger.warning(f"时间解析失败，使用当前时间: {e}")
                 dt = datetime.datetime.now()
 
-            exchange = _ctp_field_to_str(getattr(obj, "ExchangeID", None), "")
+            exchange = str(obj.ExchangeID).strip() if hasattr(obj, "ExchangeID") and obj.ExchangeID else ""
             if not exchange and symbol:
                 exchange = _infer_exchange_from_symbol(symbol)
 
             result = {
                 "symbol": symbol,
                 "exchange": exchange,
-                "last_price": float(obj.LastPrice) if hasattr(obj, 'LastPrice') and obj.LastPrice else 0.0,
-                "volume": int(obj.Volume) if hasattr(obj, 'Volume') and obj.Volume else 0,
-                "open_interest": float(obj.OpenInterest) if hasattr(obj, 'OpenInterest') and obj.OpenInterest else 0.0,
+                "last_price": float(obj.LastPrice) if hasattr(obj, "LastPrice") and obj.LastPrice else 0.0,
+                "volume": int(obj.Volume) if hasattr(obj, "Volume") and obj.Volume else 0,
+                "open_interest": float(obj.OpenInterest) if hasattr(obj, "OpenInterest") and obj.OpenInterest else 0.0,
                 "datetime": dt,
-                "bid_price_1": float(obj.BidPrice1) if hasattr(obj, 'BidPrice1') and obj.BidPrice1 else 0.0,
-                "bid_volume_1": int(obj.BidVolume1) if hasattr(obj, 'BidVolume1') and obj.BidVolume1 else 0,
-                "ask_price_1": float(obj.AskPrice1) if hasattr(obj, 'AskPrice1') and obj.AskPrice1 else 0.0,
-                "ask_volume_1": int(obj.AskVolume1) if hasattr(obj, 'AskVolume1') and obj.AskVolume1 else 0,
-                "open_price": float(obj.OpenPrice) if hasattr(obj, 'OpenPrice') and obj.OpenPrice else 0.0,
-                "high_price": float(obj.HighestPrice) if hasattr(obj, 'HighestPrice') and obj.HighestPrice else 0.0,
-                "low_price": float(obj.LowestPrice) if hasattr(obj, 'LowestPrice') and obj.LowestPrice else 0.0,
-                "pre_close": float(obj.PreClosePrice) if hasattr(obj, 'PreClosePrice') and obj.PreClosePrice else 0.0,
-                "pre_settlement": float(obj.PreSettlementPrice) if hasattr(obj, 'PreSettlementPrice') and obj.PreSettlementPrice else 0.0
+                "bid_price_1": float(obj.BidPrice1) if hasattr(obj, "BidPrice1") and obj.BidPrice1 else 0.0,
+                "bid_volume_1": int(obj.BidVolume1) if hasattr(obj, "BidVolume1") and obj.BidVolume1 else 0,
+                "ask_price_1": float(obj.AskPrice1) if hasattr(obj, "AskPrice1") and obj.AskPrice1 else 0.0,
+                "ask_volume_1": int(obj.AskVolume1) if hasattr(obj, "AskVolume1") and obj.AskVolume1 else 0,
+                "open_price": float(obj.OpenPrice) if hasattr(obj, "OpenPrice") and obj.OpenPrice else 0.0,
+                "high_price": float(obj.HighestPrice) if hasattr(obj, "HighestPrice") and obj.HighestPrice else 0.0,
+                "low_price": float(obj.LowestPrice) if hasattr(obj, "LowestPrice") and obj.LowestPrice else 0.0,
+                "pre_close": float(obj.PreClosePrice) if hasattr(obj, "PreClosePrice") and obj.PreClosePrice else 0.0,
+                "pre_settlement": float(obj.PreSettlementPrice) if hasattr(obj, "PreSettlementPrice") and obj.PreSettlementPrice else 0.0,
             }
             return result
         except Exception as e:
-            futures_logger.error(f"解析 CTP Tick 异常: {e}", exc_info=True)
+            # 解析失败时按数组打印 ActionDay 原始数据，便于排查
+            try:
+                action_day_val = getattr(obj, "ActionDay", None)
+                if action_day_val is not None:
+                    action_day_arr = list(bytes(action_day_val))
+                    futures_logger.error(
+                        "解析 CTP Tick 异常: %s；ActionDay(array): %s",
+                        e,
+                        action_day_arr,
+                        exc_info=True,
+                    )
+                else:
+                    futures_logger.error(f"解析 CTP Tick 异常: {e}；ActionDay: None", exc_info=True)
+            except Exception as log_ex:
+                futures_logger.error(
+                    f"解析 CTP Tick 异常: {e}；打印 ActionDay 时再次异常: {log_ex}",
+                    exc_info=True,
+                )
             return None
 
     @staticmethod
