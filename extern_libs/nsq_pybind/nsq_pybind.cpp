@@ -78,10 +78,6 @@ public:
         return api_ ? api_->ReqUserLogin(req, request_id) : -1;
     }
 
-    int Join() {
-        return api_ ? api_->Join() : -1;
-    }
-
     std::string GetApiErrorMsg(int err) {
         if (!api_) return std::string();
         const char *msg = api_->GetApiErrorMsg(err);
@@ -101,6 +97,14 @@ public:
             copy_cstr(reqs[i].InstrumentID, sizeof(reqs[i].InstrumentID), contracts[i].second);
         }
         return api_->ReqFutuDepthMarketDataSubscribe(reqs.data(), (int)reqs.size(), request_id);
+    }
+
+    /// 订阅指定交易所全市场期货五档（nCount=0）。exchange_id 如 "F2"(DCE),"F3"(SHFE),"F5"(INE) 等。
+    int SubscribeMarket(const std::string &exchange_id, int request_id) {
+        if (!api_) return -1;
+        CHSNsqReqFutuDepthMarketDataField req{};
+        copy_cstr(req.ExchangeID, sizeof(req.ExchangeID), exchange_id);
+        return api_->ReqFutuDepthMarketDataSubscribe(&req, 0, request_id);
     }
 
 private:
@@ -186,7 +190,7 @@ PYBIND11_MODULE(nsq_pybind, m) {
         .def("Init", &PyNsqApi::Init, py::arg("lic_file"), py::arg("safe_level") = "", py::arg("pwd") = "", py::arg("ssl_file") = "", py::arg("ssl_pwd") = "")
         .def("ReqUserLogin", &PyNsqApi::ReqUserLogin)
         .def("ReqFutuDepthMarketDataSubscribe", &PyNsqApi::ReqFutuDepthMarketDataSubscribe, py::arg("contracts"), py::arg("request_id"))
-        .def("Join", &PyNsqApi::Join)
+        .def("SubscribeMarket", &PyNsqApi::SubscribeMarket, py::arg("exchange_id"), py::arg("request_id"))
         .def("GetApiErrorMsg", &PyNsqApi::GetApiErrorMsg)
         .def("GetApiVersion", &PyNsqApi::GetApiVersion);
 }

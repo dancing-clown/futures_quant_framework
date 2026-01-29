@@ -216,9 +216,9 @@ class DataParser:
 
     @staticmethod
     def _parse_nsq_depth(obj) -> Optional[Dict]:
-        """解析 NSQ Depth（来自 nsq-dce-net-api bridge/SDK）
+        """解析 NSQ Depth（bridge/SDK 等）。
 
-        期望 obj 为 dict（或具备同名属性的对象），字段参考 `nsq-dce-net-api/src/bridge/nsq_bridge.cpp`：
+        期望 obj 为 dict（或具备同名属性的对象），字段包括：
         - InstrumentID, ExchangeID, LastPrice, TradeVolume, OpenInterest
         - BidPrice[0], BidVolume[0], AskPrice[0], AskVolume[0]
         - OpenPrice, HighestPrice, LowestPrice, PreClosePrice, PreSettlementPrice

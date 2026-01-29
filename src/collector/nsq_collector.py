@@ -29,6 +29,7 @@ class NSQCollector(BaseFuturesCollector):
             sdk_config_path=nsq_cfg.get("sdk_config_path"),
             log_path=nsq_cfg.get("log_path"),
             markets=nsq_cfg.get("markets", "dce"),
+            pybind_path=nsq_cfg.get("pybind_path"),
         )
         self.data_queue: queue.Queue = queue.Queue()
 

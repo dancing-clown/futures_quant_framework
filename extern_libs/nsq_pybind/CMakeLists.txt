@@ -52,8 +52,11 @@ pybind11_add_module(nsq_pybind nsq_pybind.cpp)
 
 # --- 链接 NSQ 库（Linux） ---
 target_link_libraries(nsq_pybind PRIVATE ${NSQ_SDK_LIB_NAME} pthread rt)
+# 仅用 $ORIGIN 作 rpath，与 .so 同目录的 libHSNsqApi.so（POST_BUILD 拷贝）可被正确加载；
+# 禁止把 link_directories 的绝对路径写入 rpath。
 set_target_properties(nsq_pybind PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "$\{ORIGIN\}"
+    INSTALL_RPATH_USE_LINK_PATH FALSE
     BUILD_WITH_INSTALL_RPATH TRUE
 )
 

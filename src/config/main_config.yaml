@@ -13,7 +13,7 @@ logger:
   backup_count: 5      # 日志文件备份数量：5个
   format: "%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s"
 
-# 行情源配置（多源开关，按需启用，贴合你的项目背景）
+# 行情源配置（多源开关，按需启用）
 market_sources:
   ctp:
     enable: true       # 是否启用CTP行情
@@ -37,15 +37,15 @@ market_sources:
     error_retry_interval: 1   # 接收异常后重试间隔（秒）
   nsq_dce_net_api:
     enable: false       # 是否启用 NSQ-DCE 行情（仅支持 Linux）
-    # nsq-dce-net-api 使用 TOML 配置文件（参考 nsq-dce-net-api/config/nsq_config*.toml）
-    config_path: "nsq-dce-net-api/config/nsq_config.toml"
+    config_path: "config/nsq_config.toml"
     # 以下字段可选：如不想在本框架重复配置，可只填写 config_path
     username: ""
     password: ""
-    sdk_config_path: "nsq-dce-net-api/config/sdk_config.ini"
-    log_path: "nsq-dce-net-api/logs/"
+    sdk_config_path: "config/sdk_config.ini"
+    log_path: "./logs/"
+    log_file: "logs/nsq_market.log"
     markets: "dce"
-    # pybind_path 可选：依赖库所在目录，不填则从 PYTHONPATH 查找
+    # pybind_path 可选：依赖库所在目录，不填则从 NSQ_PYBIND_PATH 查找
     pybind_path: "extern_libs/nsq_pybind/build"
 
   hs_future_gfex_api:
@@ -54,8 +54,8 @@ market_sources:
     port_number: 1      # 端口号
     buffer_number: 0    # RX buffer 编号
     frame_buffer_size: 2048  # 单帧接收缓冲区大小（字节）
-    # pybind_path 可选：pybind 所在目录，不填则从 PYTHONPATH 查找
-    # pybind_path: "extern_libs/exanic_pybind/build"
+    # pybind_path 可选：pybind 所在目录，不填则从 GFEX_EXANIC_PYBIND_PATH 查找
+    pybind_path: "extern_libs/exanic_pybind/build"
 
 # 采集策略配置
 collect:
@@ -90,7 +90,7 @@ storage:
   redis:
     enable: false
     host: "172.16.13.8"
-    port: 6371
+    port: 6379
     db: 0
-    password: "LZy32C2kNHqsvu4Uyj"
+    password: ""
     expire: 3600       # 缓存过期时间（秒）
