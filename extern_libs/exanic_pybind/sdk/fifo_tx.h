@@ -8,7 +8,7 @@
 #include "exanic.h"
 #include "pcie_if.h"
 #include "fifo_if.h"
-#include "time.h"
+#include "exanic_time.h"
 
 #ifdef __cplusplus
 extern "C" {

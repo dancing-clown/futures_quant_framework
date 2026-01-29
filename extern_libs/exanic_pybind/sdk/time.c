@@ -1,7 +1,7 @@
 #include "exanic.h"
 #include "pcie_if.h"
 #include "ioctl.h"
-#include "time.h"
+#include "exanic_time.h"
 
 #define NANOS_PER_SEC (1000ULL * 1000 * 1000)
 #define PICOS_PER_SEC (1000ULL * 1000 * 1000 * 1000)

@@ -10,7 +10,7 @@
  * - \ref fifo_tx.h "TX FIFO API" (TX FIFO access)
  * - \ref port.h "Port config API" (ExaNIC port configuration)
  * - \ref config.h "Network config API" (Network settings)
- * - \ref time.h "Timestamping API" (Timestamp conversion functions)
+ * - \ref exanic_time.h "Timestamping API" (Timestamp conversion functions)
  */
 #ifndef EXANIC_EXANIC_H
 #define EXANIC_EXANIC_H

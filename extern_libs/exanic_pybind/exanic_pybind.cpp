@@ -8,6 +8,8 @@
  * release_handle, get_last_error。句柄以 capsule 形式在 Python 间传递。
  */
 
+#include <ctime>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
