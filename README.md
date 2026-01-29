@@ -8,7 +8,7 @@
 
 ## 框架核心特点
 
-1. **多源行情适配**：原生支持正瀛（DCE/CZCE）、CTP（SHFE/INE/DCE/CZCE）、广发环网/广期所（全交易所）行情源，可灵活开关；
+1. **多源行情适配**：原生支持正瀛（DCE/CZCE）、CTP（SHFE/INE/DCE/CZCE）、广发环网/广期所（全交易所）行情源，并扩展集成 **NSQ-DCE 行情源**（仅 Linux），可灵活开关；
 2. **异步高实时**：默认采用aiohttp/websockets异步采集，适配期货Tick级行情高实时性要求；
 3. **标准化数据**：统一多源行情数据格式，定义核心必选字段，保证数据一致性；
 4. **可配置化**：所有参数（行情源/采集策略/存储方案/日志）均通过YAML配置文件管理，无需修改代码；
@@ -19,7 +19,8 @@
 
 ### 分层架构图（模块与依赖）
 
-框架按**六层**划分，自上而下：配置层 → 入口层 → 采集层 → 接口层 → 处理层 → 存储层；外部行情源与接口层双向通信。图中**实线**表示创建/调用依赖，**虚线**表示数据流向。
+框架按**六层**划分，自上而下：配置层 → 入口层 → 采集层 → 接口层 → 处理层 → 存储层；外部行情源与接口层双向通信。图中**实线**表示创建/调用依赖，**虚线**表示数据流向。  
+当前已接入：**CTP / 正瀛 ZMQ / NSQ-DCE（Linux-only）**。
 
 ```mermaid
 flowchart TB
@@ -35,13 +36,16 @@ flowchart TB
         AsyncCollector["AsyncFuturesCollector\n(异步采集调度)"]
         CTPCollector["CTPCollector"]
         ZYCollector["ZYZmqCollector"]
+        NSQCollector["NSQCollector\n(Linux only)"]
         AsyncCollector --> CTPCollector
         AsyncCollector --> ZYCollector
+        AsyncCollector --> NSQCollector
     end
 
     subgraph L4["第四层：接口层 api/"]
         CtpApi["CtpMarketApi"]
         ZyApi["ZYZmqApi"]
+        NsqApi["NsqMarketApi\n(Linux only)"]
     end
 
     subgraph L5["第五层：处理层 processor/"]
@@ -57,6 +61,7 @@ flowchart TB
     subgraph EXT["外部"]
         CTP["CTP 前置"]
         ZMQ["正瀛 ZMQ"]
+        NSQ["NSQ-DCE 行情\n(nsq-dce-net-api)"]
     end
 
     Config --> Main
@@ -67,27 +72,32 @@ flowchart TB
     CTPCollector --> Parser
     ZYCollector --> ZyApi
     ZYCollector --> Parser
+    NSQCollector --> NsqApi
+    NSQCollector --> Parser
     CtpApi <--> CTP
     ZyApi <--> ZMQ
+    NsqApi <--> NSQ
     AsyncCollector -.->|"标准化数据\n(dispatch_loop 汇总)"| Cleaner
     Cleaner -.->|"清洗后数据"| FileStorage
 ```
 
 ### 数据流与运行时流程
 
-从**行情源到落盘**的端到端数据流如下（从左到右）。
+从**行情源到落盘**的端到端数据流如下（从左到右），同时展示 CTP / 正瀛 ZMQ / NSQ-DCE 三路行情的汇聚方式。
 
 ```mermaid
 flowchart LR
     subgraph 行情接入
         A1["CTP 前置"]
         A2["正瀛 ZMQ"]
+        A3["NSQ-DCE 行情\n(nsq-dce-net-api)"]
     end
 
     subgraph 接口与解析
         B1["CtpMarketApi\n回调/队列"]
         B2["ZYZmqApi\n异步接收"]
-        B3["DataParser\n标准化"]
+        B3["NsqMarketApi\n(Linux only)"]
+        B4["DataParser\n标准化"]
     end
 
     subgraph 调度与清洗
@@ -101,18 +111,20 @@ flowchart LR
 
     A1 --> B1
     A2 --> B2
-    B1 --> B3
-    B2 --> B3
-    B3 --> C1
+    A3 --> B3
+    B1 --> B4
+    B2 --> B4
+    B3 --> B4
+    B4 --> C1
     C1 --> C2
     C2 --> D1
 ```
 
 **流程简述**：
 
-1. **main.py** 加载 `main_config.yaml`，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，完成连接与订阅。
-2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收；子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 转为统一格式。
-3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，通过 **data_callback** 将标准化数据交给 **DataCleaner** 清洗。
+1. **main.py** 加载 `main_config.yaml`，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，完成连接与订阅（根据 `market_sources` 启用 CTP/正瀛 ZMQ/NSQ-DCE）。  
+2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收，NSQ-DCE 通过 `NsqMarketApi`（仅 Linux）投递 Depth 数据；子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 统一转为标准化行情。  
+3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，通过 **data_callback** 将标准化数据交给 **DataCleaner** 清洗。  
 4. **DataCleaner** 去重、校验后，由 **FileStorage** 按合约、按日写入 `data/market_data/` 下的 CSV 文件。
 
 ## 环境搭建
@@ -183,9 +195,35 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)
 
 **注意**：
 
-- CMakeLists.txt 会自动根据编译环境（`APPLE` 或 `UNIX`）选择 `macos/` 或 `linux/` 目录下的 SDK
+- CMakeLists.txt 会自动根据编译环境（`APPLE` 或 `UNIX`）选择 `macos/` 或 `linux` 目录下的 SDK
 - macOS 和 Linux 的库文件命名可能不同，但编译脚本会自动处理
 - 编译完成后，CTP SDK 的库文件会自动复制到 build 目录
+
+### NSQ Pybind 编译说明（Linux only）
+
+NSQ-DCE 行情接入依赖 `nsq-dce-net-api` 提供的 C++ SDK，项目在 `extern_libs/nsq_pybind` 下提供了与 CTP 类似的 `pybind11` 封装，仅支持 **Linux** 环境。
+
+> 在 macOS 上执行 `cmake` 时会直接 `FATAL_ERROR` 提示：`nsq_pybind only supports Linux`。
+
+**准备工作（Linux）**：
+
+1. 将 NSQ SDK 的动态库置于：
+   - `extern_libs/nsq_pybind/linux/lib/libHSNsqApi.so`
+2. 确保 `nsq-dce-net-api/sdk/include` 与当前仓库路径保持默认布局（`nsq_pybind/linux/include` 里的头文件是转发到该目录）。
+
+**编译步骤（Linux）**：
+
+```bash
+# 1. 进入编译目录
+cd extern_libs/nsq_pybind
+
+# 2. 编译（只支持 Linux，macOS 会直接报错）
+mkdir -p build && cd build
+cmake ..
+make
+```
+
+生成的 `nsq_pybind*.so` 位于 `extern_libs/nsq_pybind/build` 下，可在 Linux 环境中结合 `NsqMarketApi` 扩展更底层的 SDK 调用。
 
 ## 快速运行
 
