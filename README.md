@@ -8,7 +8,7 @@
 
 ## 框架核心特点
 
-1. **多源行情适配**：原生支持正瀛（DCE/CZCE）、CTP（SHFE/INE/DCE/CZCE）、广发环网/广期所（全交易所）行情源，并扩展集成 **NSQ-DCE 行情源**（仅 Linux），可灵活开关；
+1. **多源行情适配**：原生支持正瀛（DCE/CZCE）、CTP（SHFE/INE/DCE/CZCE）、广发环网/广期所（全交易所）行情源，并扩展集成 **NSQ-DCE 行情源**（仅 Linux）、**GFEX ExaNIC 行情源**（仅 Linux，pybind11 封装 ExaNIC C SDK），可灵活开关；
 2. **异步高实时**：默认采用aiohttp/websockets异步采集，适配期货Tick级行情高实时性要求；
 3. **标准化数据**：统一多源行情数据格式，定义核心必选字段，保证数据一致性；
 4. **可配置化**：所有参数（行情源/采集策略/存储方案/日志）均通过YAML配置文件管理，无需修改代码；
@@ -20,7 +20,7 @@
 ### 分层架构图（模块与依赖）
 
 框架按**六层**划分，自上而下：配置层 → 入口层 → 采集层 → 接口层 → 处理层 → 存储层；外部行情源与接口层双向通信。图中**实线**表示创建/调用依赖，**虚线**表示数据流向。  
-当前已接入：**CTP / 正瀛 ZMQ / NSQ-DCE（Linux-only）**。
+当前已接入：**CTP / 正瀛 ZMQ / NSQ-DCE（Linux-only）/ GFEX ExaNIC（Linux-only）**。
 
 ```mermaid
 flowchart TB
@@ -37,15 +37,18 @@ flowchart TB
         CTPCollector["CTPCollector"]
         ZYCollector["ZYZmqCollector"]
         NSQCollector["NSQCollector\n(Linux only)"]
+        GfexCollector["GfexCollector\n(Linux only)"]
         AsyncCollector --> CTPCollector
         AsyncCollector --> ZYCollector
         AsyncCollector --> NSQCollector
+        AsyncCollector --> GfexCollector
     end
 
     subgraph L4["第四层：接口层 api/"]
         CtpApi["CtpMarketApi"]
         ZyApi["ZYZmqApi"]
         NsqApi["NsqMarketApi\n(Linux only)"]
+        GfexApi["GfexExanicApi\n(exanic_pybind)"]
     end
 
     subgraph L5["第五层：处理层 processor/"]
@@ -62,6 +65,7 @@ flowchart TB
         CTP["CTP 前置"]
         ZMQ["正瀛 ZMQ"]
         NSQ["NSQ-DCE 行情\n(nsq-dce-net-api)"]
+        GFEX["GFEX ExaNIC\n(libexanic)"]
     end
 
     Config --> Main
@@ -74,16 +78,19 @@ flowchart TB
     ZYCollector --> Parser
     NSQCollector --> NsqApi
     NSQCollector --> Parser
+    GfexCollector --> GfexApi
+    GfexCollector --> Parser
     CtpApi <--> CTP
     ZyApi <--> ZMQ
     NsqApi <--> NSQ
+    GfexApi <--> GFEX
     AsyncCollector -.->|"标准化数据\n(dispatch_loop 汇总)"| Cleaner
     Cleaner -.->|"清洗后数据"| FileStorage
 ```
 
 ### 数据流与运行时流程
 
-从**行情源到落盘**的端到端数据流如下（从左到右），同时展示 CTP / 正瀛 ZMQ / NSQ-DCE 三路行情的汇聚方式。
+从**行情源到落盘**的端到端数据流如下（从左到右），同时展示 CTP / 正瀛 ZMQ / NSQ-DCE / GFEX ExaNIC 的汇聚方式。
 
 ```mermaid
 flowchart LR
@@ -91,13 +98,15 @@ flowchart LR
         A1["CTP 前置"]
         A2["正瀛 ZMQ"]
         A3["NSQ-DCE 行情\n(nsq-dce-net-api)"]
+        A4["GFEX ExaNIC\n(libexanic)"]
     end
 
     subgraph 接口与解析
         B1["CtpMarketApi\n回调/队列"]
         B2["ZYZmqApi\n异步接收"]
         B3["NsqMarketApi\n(Linux only)"]
-        B4["DataParser\n标准化"]
+        B4["GfexExanicApi\n(exanic_pybind)"]
+        B5["DataParser\n标准化"]
     end
 
     subgraph 调度与清洗
@@ -112,18 +121,20 @@ flowchart LR
     A1 --> B1
     A2 --> B2
     A3 --> B3
-    B1 --> B4
-    B2 --> B4
-    B3 --> B4
-    B4 --> C1
+    A4 --> B4
+    B1 --> B5
+    B2 --> B5
+    B3 --> B5
+    B4 --> B5
+    B5 --> C1
     C1 --> C2
     C2 --> D1
 ```
 
 **流程简述**：
 
-1. **main.py** 加载 `main_config.yaml`，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，完成连接与订阅（根据 `market_sources` 启用 CTP/正瀛 ZMQ/NSQ-DCE）。  
-2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收，NSQ-DCE 通过 `NsqMarketApi`（仅 Linux）投递 Depth 数据；子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 统一转为标准化行情。  
+1. **main.py** 加载 `main_config.yaml`，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，完成连接与订阅（根据 `market_sources` 启用 CTP/正瀛 ZMQ/NSQ-DCE/GFEX ExaNIC）。  
+2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收，NSQ-DCE 通过 `NsqMarketApi`（仅 Linux）投递 Depth 数据，GFEX 通过 `GfexExanicApi`（exanic_pybind 调用 ExaNIC C SDK，仅 Linux）投递 L2 帧；子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 统一转为标准化行情。  
 3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，通过 **data_callback** 将标准化数据交给 **DataCleaner** 清洗。  
 4. **DataCleaner** 去重、校验后，由 **FileStorage** 按合约、按日写入 `data/market_data/` 下的 CSV 文件。
 
@@ -224,6 +235,36 @@ make
 ```
 
 生成的 `nsq_pybind*.so` 位于 `extern_libs/nsq_pybind/build` 下，可在 Linux 环境中结合 `NsqMarketApi` 扩展更底层的 SDK 调用。
+
+### GFEX ExaNIC / exanic_pybind 说明（Linux only）
+
+GFEX 行情通过 ExaNIC C SDK 接收，框架使用 **pybind11** 封装：在 `extern_libs/exanic_pybind` 中封装 `exanic_acquire_handle`、`exanic_acquire_rx_buffer`、`exanic_receive_frame` 等 C 接口。**所需头文件与 C 源码已拷贝至 `extern_libs/exanic_pybind/sdk/`**，CMake 直接使用该目录编译并链接进 `exanic_pybind.so`，**不依赖 hs-future-gfex-api 目录**（可删除或仅作 Rust 等他用）。Python 层 `src/api/gfex_exanic_api.py` 调用 exanic_pybind，完成连接、接收线程与 L2 帧解析（NanoGfexL2MdType）。
+
+**要求**：仅支持 **Linux**（依赖 `/dev/exanic*`、mmap、ioctl）。
+
+**编译步骤（Linux）**：
+
+```bash
+# 1. 进入 exanic_pybind 目录
+cd extern_libs/exanic_pybind
+
+# 2. 编译（仅支持 Linux，使用本目录 sdk/ 中的 C 源码，自包含）
+mkdir -p build && cd build
+cmake ..
+make
+```
+
+生成的 `exanic_pybind*.so` 位于 `extern_libs/exanic_pybind/build`。在 `main_config.yaml` 中启用 GFEX 并可选配置 `pybind_path`：
+
+```yaml
+market_sources:
+  hs_future_gfex_api:
+    enable: true
+    nic_name: "exanic0"
+    port_number: 1
+    buffer_number: 0
+    pybind_path: "extern_libs/exanic_pybind/build"  # 可选，不填则依赖 PYTHONPATH
+```
 
 ## 快速运行
 

@@ -26,23 +26,12 @@ market_sources:
     # password: ""
     flow_path: "./flow/" # 流文件路径
     subscribe_codes: ["zn2603", "y2605"]  # 订阅合约代码
-    pybind_path: "extern_libs/ctp_pybind/build" # ctp_pybind.so 编译输出路径
+    # pybind_path 可选：依赖库所在目录，不填则从 环境变量 CTP_PYBIND_PATH 查找
+    pybind_path: "extern_libs/ctp_pybind/build"
   zhengyi_zmq:
     enable: false       # 是否启用正瀛 ZMQ PUB 模式行情
     dce_address: "tcp://101.133.152.163:23333" # 大商所 ZMQ 地址
     czce_address: "tcp://101.133.152.163:23355" # 郑商所 ZMQ 地址
-  guangfa:
-    enable: false       # 是否启用广发环网/广期所行情
-    http_url: "https://guangfa_futures_api.com"  # HTTP接口地址
-    ws_url: "wss://guangfa_futures_ws.com"       # WebSocket接口地址
-    api_key: "your_guangfa_api_key"              # 广发API密钥
-    subscribe_exchanges: ["SHFE", "INE", "DCE", "CZCE", "GFEX"]  # 订阅交易所
-  zhengying:
-    enable: false       # 是否启用正瀛行情
-    host: "zhengying_api_host"
-    port: 9090
-    subscribe_exchanges: ["DCE", "CZCE"]  # 正瀛覆盖：大商所/郑商所
-
   nsq_dce_net_api:
     enable: false       # 是否启用 NSQ-DCE 行情（仅支持 Linux）
     # nsq-dce-net-api 使用 TOML 配置文件（参考 nsq-dce-net-api/config/nsq_config*.toml）
@@ -53,6 +42,16 @@ market_sources:
     sdk_config_path: "nsq-dce-net-api/config/sdk_config.ini"
     log_path: "nsq-dce-net-api/logs/"
     markets: "dce"
+    # pybind_path 可选：依赖库所在目录，不填则从 PYTHONPATH 查找
+    pybind_path: "extern_libs/nsq_pybind/build"
+
+  hs_future_gfex_api:
+    enable: false       # 是否启用 GFEX ExaNIC 行情（仅支持 Linux，需 exanic_pybind）
+    nic_name: "exanic0" # ExaNIC 设备名（/dev/exanic0）
+    port_number: 1      # 端口号
+    buffer_number: 0    # RX buffer 编号
+    # pybind_path 可选：pybind 所在目录，不填则从 PYTHONPATH 查找
+    # pybind_path: "extern_libs/exanic_pybind/build"
 
 # 采集策略配置
 collect:

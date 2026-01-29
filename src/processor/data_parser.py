@@ -36,6 +36,8 @@ class DataParser:
                 return DataParser._parse_ctp_tick(obj)
             elif msg_type == "NSQ_DEPTH":
                 return DataParser._parse_nsq_depth(obj)
+            elif msg_type == "GFEX_L2":
+                return DataParser._parse_gfex_l2(obj)
             return None
         except Exception as e:
             from src.utils import futures_logger
@@ -236,4 +238,58 @@ class DataParser:
             }
         except Exception as e:
             futures_logger.error(f"解析 NSQ Depth 异常: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def _parse_gfex_l2(obj) -> Optional[Dict]:
+        """解析 GFEX L2（来自 hs-future-gfex-api / ExaNIC，NanoGfexL2MdType 转成的 dict）"""
+        from src.utils import futures_logger
+
+        def _get(name: str, default=None):
+            if isinstance(obj, dict):
+                return obj.get(name, default)
+            return getattr(obj, name, default)
+
+        try:
+            symbol = (_get("contract_name") or "").strip()
+            last_price = float(_get("last_price", 0.0) or 0.0)
+            volume = int(_get("match_total_qty", 0) or 0)
+            open_interest = float(_get("open_interest", 0) or 0)
+            bid_price_1 = float(_get("bid1_px", 0.0) or 0.0)
+            bid_volume_1 = int(_get("bid1_vol", 0) or 0)
+            ask_price_1 = float(_get("ask1_px", 0.0) or 0.0)
+            ask_volume_1 = int(_get("ask1_vol", 0) or 0)
+
+            gen_time = (_get("gen_time") or "").strip()
+            dt = datetime.datetime.now()
+            try:
+                if gen_time and len(gen_time) >= 8:
+                    # 可能为 "HH:MM:SS" 或 "HH:MM:SS.mmm"，用今日日期
+                    today = datetime.datetime.now().strftime("%Y%m%d")
+                    if "." in gen_time:
+                        dt = datetime.datetime.strptime(f"{today} {gen_time}", "%Y%m%d %H:%M:%S.%f")
+                    else:
+                        dt = datetime.datetime.strptime(f"{today} {gen_time}", "%Y%m%d %H:%M:%S")
+            except Exception as e:
+                futures_logger.warning(f"GFEX gen_time 解析失败，使用当前时间: {e}")
+
+            return {
+                "symbol": symbol,
+                "exchange": "GFEX",
+                "last_price": last_price,
+                "volume": volume,
+                "open_interest": open_interest,
+                "datetime": dt,
+                "bid_price_1": bid_price_1,
+                "bid_volume_1": bid_volume_1,
+                "ask_price_1": ask_price_1,
+                "ask_volume_1": ask_volume_1,
+                "open_price": 0.0,
+                "high_price": 0.0,
+                "low_price": 0.0,
+                "pre_close": 0.0,
+                "pre_settlement": 0.0,
+            }
+        except Exception as e:
+            futures_logger.error(f"解析 GFEX L2 异常: {e}", exc_info=True)
             return None

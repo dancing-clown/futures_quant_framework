@@ -8,6 +8,7 @@ from src.collector.base_collector import BaseFuturesCollector
 from src.collector.zy_collector import ZYZmqCollector
 from src.collector.ctp_collector import CTPCollector
 from src.collector.nsq_collector import NSQCollector
+from src.collector.gfex_collector import GfexCollector
 from src.utils import futures_logger
 
 class AsyncFuturesCollector(BaseFuturesCollector):
@@ -30,6 +31,10 @@ class AsyncFuturesCollector(BaseFuturesCollector):
         # NSQ-DCE（Linux only）
         if self.market_sources.get("nsq_dce_net_api", {}).get("enable"):
             self.collectors.append(NSQCollector(self.market_sources))
+
+        # GFEX ExaNIC（Linux only，ctypes 调用 libexanic.so）
+        if self.market_sources.get("hs_future_gfex_api", {}).get("enable") or self.market_sources.get("gfex", {}).get("enable"):
+            self.collectors.append(GfexCollector(self.market_sources))
 
     def init_connections(self) -> bool:
         """初始化所有子采集器的连接"""

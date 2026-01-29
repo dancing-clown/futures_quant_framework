@@ -8,45 +8,37 @@ import threading
 from typing import Optional, Callable, List
 from src.utils import futures_logger
 
+
 def setup_ctp_path(custom_path: Optional[str] = None):
-    """自动将 pybind 编译路径加入 sys.path"""
-    search_paths = [
-        custom_path,
-        os.path.join(os.getcwd(), "extern_libs/ctp_pybind/build"),
-        os.path.join(os.path.dirname(__file__), "../../extern_libs/ctp_pybind/build")
-    ]
+    """根据配置/环境动态注入 pybind 搜索路径"""
+    search_paths = []
+    # 优先使用显式传入的路径
+    if custom_path:
+        search_paths.append(custom_path)
+    # 其次使用环境变量（例如 CTP_PYBIND_PATH）
+    env_path = os.getenv("CTP_PYBIND_PATH")
+    if env_path:
+        search_paths.append(env_path)
+
     for path in search_paths:
         if path and os.path.exists(path) and path not in sys.path:
             sys.path.append(path)
             futures_logger.debug(f"已添加 CTP Pybind 搜索路径: {path}")
 
-# 初始化时尝试设置路径
-setup_ctp_path()
 
-try:
-    # 尝试导入 pybind11 模块
-    import ctp_pybind
-    # 导出 CTP 数据结构，供其他模块使用
-    CThostFtdcDepthMarketDataField = ctp_pybind.CThostFtdcDepthMarketDataField
-    CThostFtdcReqUserLoginField = ctp_pybind.CThostFtdcReqUserLoginField
-    CThostFtdcRspUserLoginField = ctp_pybind.CThostFtdcRspUserLoginField
-    CThostFtdcRspInfoField = ctp_pybind.CThostFtdcRspInfoField
-except ImportError:
-    ctp_pybind = None
-    # 延迟到使用时再打印警告
-    # 定义占位符类，避免导入错误
-    class CThostFtdcDepthMarketDataField:
-        pass
-    class CThostFtdcReqUserLoginField:
-        pass
-    class CThostFtdcRspUserLoginField:
-        pass
-    class CThostFtdcRspInfoField:
-        pass
+# 全局 pybind 句柄及占位类型，真正的绑定在运行时成功导入后再覆盖
+ctp_pybind = None
 
-BaseSpi = ctp_pybind.CThostFtdcMdSpi if ctp_pybind else object
+class CThostFtdcDepthMarketDataField:  # 占位，避免导入错误
+    pass
+class CThostFtdcReqUserLoginField:
+    pass
+class CThostFtdcRspUserLoginField:
+    pass
+class CThostFtdcRspInfoField:
+    pass
 
-class CtpSpiWrapper(BaseSpi):
+class CtpSpiWrapper:
     """CTP 回调处理包装类"""
     def __init__(self, api_instance, callback: Callable):
         if ctp_pybind:
@@ -158,15 +150,22 @@ class CtpMarketApi:
         self.investor_id = investor_id
         self.password = password
         self.use_anonymous_login = not (broker_id and investor_id and password)
-        
+        # 仅在拿到配置或环境后，再注入 pybind 路径并尝试导入
         if pybind_path:
             setup_ctp_path(pybind_path)
-            global ctp_pybind
-            if not ctp_pybind:
-                try:
-                    import ctp_pybind
-                except ImportError:
-                    pass
+        global ctp_pybind
+        if not ctp_pybind:
+            try:
+                import ctp_pybind as _ctp_pybind
+                ctp_pybind = _ctp_pybind
+                # 覆盖占位类型与 SPI 基类
+                CThostFtdcDepthMarketDataField = ctp_pybind.CThostFtdcDepthMarketDataField
+                CThostFtdcReqUserLoginField = ctp_pybind.CThostFtdcReqUserLoginField
+                CThostFtdcRspUserLoginField = ctp_pybind.CThostFtdcRspUserLoginField
+                CThostFtdcRspInfoField = ctp_pybind.CThostFtdcRspInfoField
+                futures_logger.debug("ctp_pybind 导入成功")
+            except ImportError:
+                futures_logger.error("ctp_pybind 模块不可用，请先编译 ctp_pybind")
         
         if not os.path.exists(self.flow_path):
             os.makedirs(self.flow_path, exist_ok=True)
@@ -189,13 +188,43 @@ class CtpMarketApi:
             
         try:
             self.api = ctp_pybind.CThostFtdcMdApi(self.flow_path)
-            self.spi = CtpSpiWrapper(self, callback)
+
+            # 逻辑包装器（纯 Python），负责具体业务逻辑
+            wrapper = CtpSpiWrapper(self, callback)
+
+            # 实际注册给 CTP 的 SPI（继承自 pybind 导出的 CThostFtdcMdSpi），仅做方法转发
+            SpiBase = ctp_pybind.CThostFtdcMdSpi
+
+            class _PyCtpSpi(SpiBase):
+                def __init__(self):
+                    super().__init__()
+                    self._w = wrapper
+
+                def OnFrontConnected(self):
+                    self._w.OnFrontConnected()
+
+                def OnFrontDisconnected(self, nReason: int):
+                    self._w.OnFrontDisconnected(nReason)
+
+                def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast):
+                    self._w.OnRspUserLogin(pRspUserLogin, pRspInfo, nRequestID, bIsLast)
+
+                def OnRtnDepthMarketData(self, pDepthMarketData):
+                    self._w.OnRtnDepthMarketData(pDepthMarketData)
+
+                def OnRspSubMarketData(self, pSpecificInstrument, pRspInfo, nRequestID, bIsLast):
+                    self._w.OnRspSubMarketData(pSpecificInstrument, pRspInfo, nRequestID, bIsLast)
+
+                def OnRspError(self, pRspInfo, nRequestID, bIsLast):
+                    self._w.OnRspError(pRspInfo, nRequestID, bIsLast)
+
+            self.spi = _PyCtpSpi()
             
             # 设置订阅列表（在登录成功后会使用）
             if auto_subscribe:
-                self.spi.subscribe_symbols = self.subscribe_symbols.copy() if self.subscribe_symbols else []
-                futures_logger.debug(f"设置自动订阅列表: {self.spi.subscribe_symbols}")
-            
+                # wrapper 已经持有 subscribe_symbols 引用，这里仅做日志输出
+                futures_logger.debug(f"设置自动订阅列表: {self.subscribe_symbols}")
+
             self.api.RegisterSpi(self.spi)
             futures_logger.debug(f"注册 SPI")
             futures_logger.debug(f"注册前台地址: {self.front_address}")
