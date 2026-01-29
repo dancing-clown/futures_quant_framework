@@ -28,3 +28,4 @@ build/
 *.egg-info/
 ctp-market-api/
 flow/
+nsq-dce-net-api/

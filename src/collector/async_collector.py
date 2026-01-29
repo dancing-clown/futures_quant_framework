@@ -7,6 +7,7 @@ from typing import List, Dict
 from src.collector.base_collector import BaseFuturesCollector
 from src.collector.zy_collector import ZYZmqCollector
 from src.collector.ctp_collector import CTPCollector
+from src.collector.nsq_collector import NSQCollector
 from src.utils import futures_logger
 
 class AsyncFuturesCollector(BaseFuturesCollector):
@@ -25,6 +26,10 @@ class AsyncFuturesCollector(BaseFuturesCollector):
         
         if self.market_sources.get("ctp", {}).get("enable"):
             self.collectors.append(CTPCollector(self.market_sources))
+
+        # NSQ-DCE（Linux only）
+        if self.market_sources.get("nsq_dce_net_api", {}).get("enable"):
+            self.collectors.append(NSQCollector(self.market_sources))
 
     def init_connections(self) -> bool:
         """初始化所有子采集器的连接"""

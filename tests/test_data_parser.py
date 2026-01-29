@@ -64,3 +64,34 @@ class TestDataParser:
         assert "exchange" in FUTURES_BASE_FIELDS
         assert "last_price" in FUTURES_BASE_FIELDS
         assert "datetime" in FUTURES_BASE_FIELDS
+
+    def test_parse_nsq_depth_success(self):
+        """测试 NSQ Depth 解析成功（dict 输入）"""
+        raw = {
+            "type": "NSQ_DEPTH",
+            "data": {
+                "InstrumentID": "y2605",
+                "ExchangeID": "DCE",
+                "LastPrice": 7500.0,
+                "TradeVolume": 123,
+                "OpenInterest": 456.0,
+                "BidPrice": [7499.0, 0, 0, 0, 0],
+                "BidVolume": [10, 0, 0, 0, 0],
+                "AskPrice": [7501.0, 0, 0, 0, 0],
+                "AskVolume": [12, 0, 0, 0, 0],
+                "OpenPrice": 7400.0,
+                "HighestPrice": 7600.0,
+                "LowestPrice": 7350.0,
+                "PreClosePrice": 7390.0,
+                "PreSettlementPrice": 7380.0,
+                "ActionDay": "20250129",
+                "UpdateTime": "09:30:00",
+            },
+        }
+        result = DataParser.parse_raw_data(raw)
+        assert result is not None
+        assert result["symbol"] == "y2605"
+        assert result["exchange"] == "DCE"
+        assert result["last_price"] == 7500.0
+        assert result["bid_price_1"] == 7499.0
+        assert result["ask_price_1"] == 7501.0

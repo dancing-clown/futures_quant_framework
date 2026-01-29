@@ -43,6 +43,17 @@ market_sources:
     port: 9090
     subscribe_exchanges: ["DCE", "CZCE"]  # 正瀛覆盖：大商所/郑商所
 
+  nsq_dce_net_api:
+    enable: false       # 是否启用 NSQ-DCE 行情（仅支持 Linux）
+    # nsq-dce-net-api 使用 TOML 配置文件（参考 nsq-dce-net-api/config/nsq_config*.toml）
+    config_path: "nsq-dce-net-api/config/nsq_config.toml"
+    # 以下字段可选：如不想在本框架重复配置，可只填写 config_path
+    username: ""
+    password: ""
+    sdk_config_path: "nsq-dce-net-api/config/sdk_config.ini"
+    log_path: "nsq-dce-net-api/logs/"
+    markets: "dce"
+
 # 采集策略配置
 collect:
   mode: "async"        # 采集模式：async（异步，推荐）/sync（同步）
