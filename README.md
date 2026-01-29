@@ -17,45 +17,46 @@
 
 ## 框架设计：模块交互流程图
 
-### 模块方框图
+### 分层架构图（模块与依赖）
 
-下图展示各模块的层次关系与依赖方向（配置 → 入口 → 采集/处理/存储）。
+框架按**六层**划分，自上而下：配置层 → 入口层 → 采集层 → 接口层 → 处理层 → 存储层；外部行情源与接口层双向通信。图中**实线**表示创建/调用依赖，**虚线**表示数据流向。
 
 ```mermaid
 flowchart TB
-    subgraph 配置层
-        Config[config/main_config.yaml]
+    subgraph L1["第一层：配置层"]
+        Config["main_config.yaml\n(src/config/)"]
     end
 
-    subgraph 入口
-        Main[main.py]
+    subgraph L2["第二层：入口层"]
+        Main["main.py\n(项目入口)"]
     end
 
-    subgraph 采集层
-        AsyncCollector[AsyncFuturesCollector]
-        CTPCollector[CTPCollector]
-        ZYCollector[ZYZmqCollector]
+    subgraph L3["第三层：采集层 collector/"]
+        AsyncCollector["AsyncFuturesCollector\n(异步采集调度)"]
+        CTPCollector["CTPCollector"]
+        ZYCollector["ZYZmqCollector"]
         AsyncCollector --> CTPCollector
         AsyncCollector --> ZYCollector
     end
 
-    subgraph 接口层["api/"]
-        CtpApi[CtpMarketApi]
-        ZyApi[ZYZmqApi]
+    subgraph L4["第四层：接口层 api/"]
+        CtpApi["CtpMarketApi"]
+        ZyApi["ZYZmqApi"]
     end
 
-    subgraph 处理层["processor/"]
-        Parser[DataParser]
-        Cleaner[DataCleaner]
+    subgraph L5["第五层：处理层 processor/"]
+        Parser["DataParser\n(多源标准化解析)"]
+        Cleaner["DataCleaner\n(去重/校验)"]
+        Parser --> Cleaner
     end
 
-    subgraph 存储层["storage/"]
-        FileStorage[FileStorage]
+    subgraph L6["第六层：存储层 storage/"]
+        FileStorage["FileStorage\n(按日按合约 CSV)"]
     end
 
-    subgraph 外部行情源
-        CTP(CTP 前置)
-        ZMQ(正瀛 ZMQ)
+    subgraph EXT["外部"]
+        CTP["CTP 前置"]
+        ZMQ["正瀛 ZMQ"]
     end
 
     Config --> Main
@@ -63,39 +64,39 @@ flowchart TB
     Main --> Cleaner
     Main --> FileStorage
     CTPCollector --> CtpApi
-    ZYCollector --> ZyApi
     CTPCollector --> Parser
+    ZYCollector --> ZyApi
     ZYCollector --> Parser
     CtpApi <--> CTP
     ZyApi <--> ZMQ
-    AsyncCollector -.->|标准化数据| Cleaner
-    Cleaner -.->|清洗后数据| FileStorage
+    AsyncCollector -.->|"标准化数据\n(dispatch_loop 汇总)"| Cleaner
+    Cleaner -.->|"清洗后数据"| FileStorage
 ```
 
 ### 数据流与运行时流程
 
-从行情源到落盘的整体数据流与调用关系如下。
+从**行情源到落盘**的端到端数据流如下（从左到右）。
 
 ```mermaid
 flowchart LR
     subgraph 行情接入
-        A1[CTP 前置]
-        A2[正瀛 ZMQ]
+        A1["CTP 前置"]
+        A2["正瀛 ZMQ"]
     end
 
-    subgraph 采集与解析
-        B1[CTP API 回调/队列]
-        B2[ZY API 异步接收]
-        B3[DataParser 标准化]
+    subgraph 接口与解析
+        B1["CtpMarketApi\n回调/队列"]
+        B2["ZYZmqApi\n异步接收"]
+        B3["DataParser\n标准化"]
     end
 
-    subgraph 调度与处理
-        C1[dispatch_loop 汇总]
-        C2[DataCleaner 去重/校验]
+    subgraph 调度与清洗
+        C1["dispatch_loop\n汇总"]
+        C2["DataCleaner\n去重/校验"]
     end
 
-    subgraph 输出
-        D1[FileStorage 按日按合约 CSV]
+    subgraph 落盘
+        D1["FileStorage\nCSV"]
     end
 
     A1 --> B1
@@ -109,10 +110,10 @@ flowchart LR
 
 **流程简述**：
 
-1. **main.py** 加载配置，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，并完成连接初始化与订阅。
-2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收；各子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 转为统一格式。
-3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，调用 **data_callback**，将标准化数据交给 **DataCleaner** 清洗。
-4. 清洗后的数据由 **FileStorage** 按合约、按日写入 `data/market_data/` 下的 CSV 文件。
+1. **main.py** 加载 `main_config.yaml`，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，完成连接与订阅。
+2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收；子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 转为统一格式。
+3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，通过 **data_callback** 将标准化数据交给 **DataCleaner** 清洗。
+4. **DataCleaner** 去重、校验后，由 **FileStorage** 按合约、按日写入 `data/market_data/` 下的 CSV 文件。
 
 ## 环境搭建
 
