@@ -43,7 +43,7 @@ def _get_exanic_pybind():
         _exanic_pybind = m
         return m
     except ImportError as e:
-        raise ImportError(
+        raise MarketSourceError(
             "未找到 exanic_pybind。请在 Linux 下编译 extern_libs/exanic_pybind，"
             "并通过 GFEX 配置项 pybind_path 或环境变量 GFEX_EXANIC_PYBIND_PATH "
             "将 build 目录加入 PYTHONPATH。"
@@ -111,12 +111,14 @@ class GfexExanicApi:
         port_number: int = 1,
         buffer_number: int = 0,
         pybind_path: Optional[str] = None,
+        frame_buffer_size: int = 2048,
     ):
         _ensure_linux()
         self.nic_name = nic_name
         self.port_number = port_number
         self.buffer_number = buffer_number
         self._pybind_path = pybind_path
+        self._frame_buffer_size = frame_buffer_size
         self._api = None  # exanic_pybind 模块
         self._nic_cap = None  # capsule
         self._rx_cap = None
@@ -142,7 +144,14 @@ class GfexExanicApi:
         return self._api
 
     def connect(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """打开网卡、申请 RX 缓冲区并启动接收线程，收到一帧即调用 callback(data_dict)。"""
+        """打开网卡、申请 RX 缓冲区并启动接收线程，收到一帧即调用 callback。
+
+        Args:
+            callback: 接收 {"type": "GFEX_L2", "data": dict} 的回调。
+
+        Returns:
+            成功返回 True，否则 False。
+        """
         _ensure_linux()
         api = self._load_pybind()
         nic = api.acquire_handle(self.nic_name)
@@ -172,7 +181,7 @@ class GfexExanicApi:
         if not api or rx is None:
             return
         while self._running:
-            raw = api.receive_frame(rx, 2048)
+            raw = api.receive_frame(rx, self._frame_buffer_size)
             if not raw:
                 time.sleep(0.0001)
                 continue
@@ -182,6 +191,7 @@ class GfexExanicApi:
                     self._callback({"type": "GFEX_L2", "data": data})
 
     def close(self) -> None:
+        """停止接收线程并释放 ExaNIC 句柄与 RX 缓冲区。"""
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)

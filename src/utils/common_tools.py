@@ -9,11 +9,17 @@ import pandas as pd
 from .logger import futures_logger
 
 def dt2timestamp(dt: Union[datetime.datetime, str], fmt: str = "%Y-%m-%d %H:%M:%S") -> int:
-    """
-    时间对象/字符串转毫秒级时间戳（期货行情通用时间戳格式）
-    :param dt: 时间对象或字符串
-    :param fmt: 时间字符串格式
-    :return: 毫秒级时间戳
+    """时间对象/字符串转毫秒级时间戳（期货行情通用时间戳格式）。
+
+    Args:
+        dt: 时间对象或时间字符串。
+        fmt: 时间字符串的格式，默认 "%Y-%m-%d %H:%M:%S"。
+
+    Returns:
+        毫秒级时间戳。
+
+    Raises:
+        Exception: 格式不匹配或转换失败时记录日志并重新抛出。
     """
     try:
         if isinstance(dt, str):
@@ -25,11 +31,17 @@ def dt2timestamp(dt: Union[datetime.datetime, str], fmt: str = "%Y-%m-%d %H:%M:%
         raise
 
 def timestamp2dt(ts: int, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-    """
-    毫秒级时间戳转指定格式的时间字符串
-    :param ts: 毫秒级时间戳
-    :param fmt: 目标时间格式
-    :return: 时间字符串
+    """毫秒级时间戳转指定格式的时间字符串。
+
+    Args:
+        ts: 毫秒级时间戳。
+        fmt: 目标时间格式，默认 "%Y-%m-%d %H:%M:%S"。
+
+    Returns:
+        格式化后的时间字符串。
+
+    Raises:
+        Exception: 转换失败时记录日志并重新抛出。
     """
     try:
         # 毫秒转秒
@@ -40,10 +52,13 @@ def timestamp2dt(ts: int, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         raise
 
 def parse_futures_code(code: str) -> Optional[dict]:
-    """
-    解析期货合约代码（如rb2405 -> 品种：rb，年份：24，月份：05）
-    :param code: 期货合约代码
-    :return: 解析结果字典，失败返回None
+    """解析期货合约代码（如 rb2405 -> 品种、年份、月份）。
+
+    Args:
+        code: 期货合约代码字符串。
+
+    Returns:
+        解析结果字典（symbol、year、month、full_code），失败返回 None。
     """
     try:
         # 提取数字部分（年份+月份）
@@ -70,11 +85,14 @@ def parse_futures_code(code: str) -> Optional[dict]:
         return None
 
 def check_data_validity(data: dict, required_fields: list) -> bool:
-    """
-    校验行情数据字段完整性（多源数据解析后必检）
-    :param data: 行情数据字典
-    :param required_fields: 必选字段列表（如["code", "price", "volume", "timestamp"]）
-    :return: 校验通过返回True，否则False
+    """校验行情数据字段完整性（多源数据解析后必检）。
+
+    Args:
+        data: 行情数据字典。
+        required_fields: 必选字段列表（如 ["code", "price", "volume", "timestamp"]）。
+
+    Returns:
+        校验通过返回 True，否则 False。
     """
     missing_fields = [f for f in required_fields if f not in data or data[f] is None]
     if missing_fields:

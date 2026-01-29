@@ -12,12 +12,14 @@ from src.collector.gfex_collector import GfexCollector
 from src.utils import futures_logger
 
 class AsyncFuturesCollector(BaseFuturesCollector):
-    """异步行情采集器（分发器）"""
-    
-    def __init__(self, market_sources: Dict):
+    """异步行情采集器（分发器）。"""
+
+    def __init__(self, market_sources: Dict, collect_config: Dict = None):
         super().__init__(market_sources)
         self.collectors: List[BaseFuturesCollector] = []
-        self._running = True  # 运行标志，用于控制循环退出
+        self._running = True
+        _cfg = collect_config or {}
+        self._dispatch_interval = float(_cfg.get("dispatch_interval", _cfg.get("interval", 0.1)))
         self._init_sub_collectors()
 
     def _init_sub_collectors(self):
@@ -98,18 +100,17 @@ class AsyncFuturesCollector(BaseFuturesCollector):
                         # 从所有采集器的队列中采集数据
                         data = self.collect_data()
                         if data:
-                            futures_logger.info(f"分发 {len(data)} 条数据到回调")
+                            futures_logger.debug(f"分发 {len(data)} 条数据到回调")
                             await on_data_callback(data)
                         
-                        # CTP 回调是同步的，需要定期检查队列
-                        # 100ms 检查一次，确保及时处理队列中的数据
-                        await asyncio.sleep(0.1)
+                        # CTP 回调是同步的，需按配置间隔检查队列
+                        await asyncio.sleep(self._dispatch_interval)
                     except asyncio.CancelledError:
                         futures_logger.info("数据分发循环被取消")
                         raise
                     except Exception as e:
                         futures_logger.error(f"数据分发循环异常: {e}", exc_info=True)
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(self._dispatch_interval)
             except asyncio.CancelledError:
                 futures_logger.info("数据分发循环已取消")
                 raise

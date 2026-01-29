@@ -3,9 +3,31 @@
 负责将各源原始数据转换为框架统一格式 (FUTURES_BASE_FIELDS)
 """
 import datetime
+import re
 from typing import Dict, Optional
 from src.api.zy_zmq_api import DCEL1_Quotation, CZCEL2_Quotation
 from src.api.ctp_api import CThostFtdcDepthMarketDataField
+from src.utils.exceptions import DataParseError
+
+# 合约品种代码 -> 交易所（用于 CTP ExchangeID 为空时补全）
+# 上期所 SHFE、大商所 DCE、郑商所 CZCE、上海能源 INE、广期所 GFEX
+_SYMBOL_TO_EXCHANGE = {
+    "cu": "SHFE", "al": "SHFE", "zn": "SHFE", "pb": "SHFE", "ni": "SHFE",
+    "sn": "SHFE", "au": "SHFE", "ag": "SHFE", "rb": "SHFE", "hc": "SHFE",
+    "ss": "SHFE", "bu": "SHFE", "ru": "SHFE", "br": "SHFE", "sp": "SHFE",
+    "fu": "SHFE", "wr": "SHFE",
+    "c": "DCE", "cs": "DCE", "a": "DCE", "b": "DCE", "m": "DCE", "y": "DCE",
+    "p": "DCE", "fb": "DCE", "bb": "DCE", "jd": "DCE", "rr": "DCE", "lh": "DCE",
+    "l": "DCE", "v": "DCE", "pp": "DCE", "jm": "DCE", "j": "DCE", "i": "DCE",
+    "eg": "DCE", "eb": "DCE", "pg": "DCE",
+    "sr": "CZCE", "cf": "CZCE", "wh": "CZCE", "pm": "CZCE", "ri": "CZCE",
+    "lr": "CZCE", "jr": "CZCE", "rm": "CZCE", "rs": "CZCE", "oi": "CZCE",
+    "cy": "CZCE", "ap": "CZCE", "cj": "CZCE", "pk": "CZCE", "zc": "CZCE",
+    "ta": "CZCE", "ma": "CZCE", "fg": "CZCE", "sf": "CZCE", "sm": "CZCE",
+    "ur": "CZCE", "sa": "CZCE", "pf": "CZCE", "px": "CZCE", "sh": "CZCE",
+    "bc": "INE", "sc": "INE", "lu": "INE", "nr": "INE", "ec": "INE",
+    "si": "GFEX", "lc": "GFEX", "ps": "GFEX",
+}
 
 # 框架统一基础字段定义
 FUTURES_BASE_FIELDS = [
@@ -14,12 +36,78 @@ FUTURES_BASE_FIELDS = [
     "open_price", "high_price", "low_price", "pre_close", "pre_settlement"
 ]
 
+def _ctp_field_to_str(val, default: str = "") -> str:
+    """将 CTP 结构体中的字符串/字节字段安全转为 str（兼容 macOS/Linux 下 bytes 或 pybind char[]）。
+
+    CTP/pybind 可能返回 Python bytes、str，或 C++ char 数组的包装类型。后者走 str(val) 时
+    pybind 会按 UTF-8 解码导致 UnicodeDecodeError，故对非 str 类型优先按“原始字节”取 buffer 再 GBK 解码。
+
+    Args:
+        val: 字段值，可为 bytes、str、None 或支持 buffer 的 pybind 类型。
+        default: 为空或解码失败时的返回值。
+
+    Returns:
+        非空时去首尾空白后的字符串，否则返回 default。
+    """
+    if val is None:
+        return default
+    if isinstance(val, str):
+        return val.strip() or default
+    # 统一按“原始字节”处理：bytes 或支持 buffer 的 pybind 类型，避免走 __str__ 触发 utf-8
+    raw: bytes
+    if isinstance(val, bytes):
+        raw = val
+    else:
+        try:
+            raw = bytes(val)  # pybind char[] 等支持 buffer protocol
+        except Exception:
+            try:
+                return str(val).strip() or default
+            except UnicodeDecodeError:
+                return default
+    if not raw:
+        return default
+    try:
+        return raw.decode("gbk", errors="replace").strip() or default
+    except Exception:
+        return raw.decode("latin-1", errors="replace").strip() or default
+
+
+def _infer_exchange_from_symbol(symbol: str) -> str:
+    """根据合约代码推断交易所（仅当 CTP 等源未返回 ExchangeID 时用于补全）。
+
+    Args:
+        symbol: 合约代码，如 zn2603、y2605。
+
+    Returns:
+        交易所代码（SHFE/DCE/CZCE/INE/GFEX），无法推断时返回空字符串。
+    """
+    if not symbol or not symbol.strip():
+        return ""
+    s = symbol.strip().lower()
+    # 去掉末尾数字，得到品种代码（如 zn2603 -> zn, y2605 -> y）
+    prefix = re.sub(r"[0-9]+$", "", s)
+    if not prefix:
+        return ""
+    return _SYMBOL_TO_EXCHANGE.get(prefix, "")
+
+
 class DataParser:
     """行情数据解析器"""
-    
+
     @staticmethod
     def parse_raw_data(raw_msg: Dict) -> Optional[Dict]:
-        """解析原始数据，自动识别源类型"""
+        """解析原始数据，按 type 自动识别源并转换为统一格式。
+
+        Args:
+            raw_msg: 含 "type" 与 "data" 的原始消息字典。
+
+        Returns:
+            标准化行情字典（符合 FUTURES_BASE_FIELDS），未知类型或无数据时返回 None。
+
+        Raises:
+            DataParseError: 解析过程发生异常时抛出。
+        """
         try:
             msg_type = raw_msg.get("type")
             obj = raw_msg.get("data")
@@ -42,7 +130,7 @@ class DataParser:
         except Exception as e:
             from src.utils import futures_logger
             futures_logger.error(f"数据解析异常: {e}", exc_info=True)
-            return None
+            raise DataParseError(f"数据解析失败: {e}") from e
 
     @staticmethod
     def _parse_dce_l1(obj: DCEL1_Quotation) -> Dict:
@@ -100,33 +188,33 @@ class DataParser:
 
     @staticmethod
     def _parse_ctp_tick(obj) -> Dict:
-        """解析 CTP Tick
-        注意：pybind11 绑定的字符串属性已经是 Python str 类型，不需要 decode
+        """解析 CTP Tick。
+
+        兼容 pybind 返回的字符串为 str 或 bytes（如 macOS 下为 char 数组），统一安全解码为 str。
         """
         from src.utils import futures_logger
-        
+
         try:
-            # pybind11 返回的是 std::string，已经是 Python str，不需要 decode
-            symbol = str(obj.InstrumentID).strip() if hasattr(obj, 'InstrumentID') and obj.InstrumentID else ""
-            # CTP UpdateTime: HH:MM:SS, UpdateMillisec: 500
-            time_str = str(obj.UpdateTime) if hasattr(obj, 'UpdateTime') and obj.UpdateTime else "00:00:00"
-            date_str = str(obj.ActionDay) if hasattr(obj, 'ActionDay') and obj.ActionDay else ""  # 业务日期
-            ms = int(obj.UpdateMillisec) if hasattr(obj, 'UpdateMillisec') else 0
-            
-            # 解析时间
+            symbol = _ctp_field_to_str(getattr(obj, "InstrumentID", None), "")
+            time_str = _ctp_field_to_str(getattr(obj, "UpdateTime", None), "00:00:00") or "00:00:00"
+            date_str = _ctp_field_to_str(getattr(obj, "ActionDay", None), "")
+            ms = int(obj.UpdateMillisec) if hasattr(obj, "UpdateMillisec") else 0
+
             try:
                 if date_str and time_str and len(date_str) == 8:
-                    dt = datetime.datetime.strptime(f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f")
+                    dt = datetime.datetime.strptime(
+                        f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f"
+                    )
                 else:
-                    # 如果时间信息不完整，使用当前时间
                     dt = datetime.datetime.now()
             except (ValueError, AttributeError) as e:
-                # 时间解析失败，使用当前时间
                 futures_logger.warning(f"时间解析失败，使用当前时间: {e}")
                 dt = datetime.datetime.now()
-            
-            exchange = str(obj.ExchangeID).strip() if hasattr(obj, 'ExchangeID') and obj.ExchangeID else ""
-            
+
+            exchange = _ctp_field_to_str(getattr(obj, "ExchangeID", None), "")
+            if not exchange and symbol:
+                exchange = _infer_exchange_from_symbol(symbol)
+
             result = {
                 "symbol": symbol,
                 "exchange": exchange,

@@ -1,8 +1,6 @@
 # 基础环境（Python3.14+）
 # 异步采集/接口（IO密集型核心）
 pyzmq>=25.0.0
-aiohttp>=3.9.1
-websockets>=12.0
 # 数据处理（期货行情时间序列核心）
 pandas>=2.1.0
 numpy>=1.26.0

@@ -1,0 +1,68 @@
+---
+description: 项目编码与工程规范（PEP8、docstring、异常、日志、配置、模块化）
+alwaysApply: true
+---
+
+# 期货量化框架工程规范
+
+## 编码规范
+
+- 严格遵循 **PEP8**。
+- 变量 / 函数：**小写下划线**（`snake_case`），见名知意。
+- 类：**大驼峰**（`PascalCase`）。
+- 常量可全大写下划线（如 `MAX_RETRY`）。
+
+## 注释规范
+
+- **所有**函数 / 类必须添加 **Google 风格 docstring**（Args、Returns、Raises 等）。
+- 核心业务逻辑添加**行注释**，说明“为什么”或关键步骤。
+- 简单、自解释的代码**无需**加注释。
+
+```python
+def parse_tick(raw: dict) -> dict:
+    """将原始行情解析为统一 tick 结构。
+
+    Args:
+        raw: 行情源原始字典。
+
+    Returns:
+        标准化 tick 字典，含 instrument_id, last_price 等字段。
+
+    Raises:
+        DataParseError: 必选字段缺失或格式非法时抛出。
+    """
+    # 多源字段映射不同，此处做统一转换
+    ...
+```
+
+## 异常处理
+
+- **所有可能抛出异常的地方必须捕获**，不得裸奔 `raise` 到顶层。
+- **优先使用** `src/utils/exceptions.py` 中的业务异常：
+  - `MarketSourceError`：行情源连接/订阅失败等
+  - `DataParseError`：解析字段缺失或格式错误
+  - `DataCleanError`：清洗逻辑异常（如时间戳乱序）
+  - `StorageError`：存储/写入失败
+  - `CollectError`：采集超时、重试失败等
+- 捕获后根据场景：打日志、重试、或包装为上述业务异常再抛出。
+
+## 日志规范
+
+- **全项目统一使用** `src/utils/logger.py` 的日志器：
+  - `from src.utils.logger import get_futures_logger` 或使用已有 `futures_logger`。
+- 按级别输出：
+  - **DEBUG**：调试信息、中间状态。
+  - **INFO**：正常流程（如连接成功、采集开始/结束）。
+  - **WARNING**：可恢复异常、重试、降级。
+  - **ERROR**：业务失败、需关注的错误。
+- 禁止在业务代码中 `print` 替代日志；禁止自行 `logging.getLogger(__name__)` 而不用项目 logger。
+
+## 配置规范
+
+- **所有可变参数**（地址、端口、开关、路径、重试次数等）**必须**放入 `src/config/main_config.yaml`。
+- **禁止硬编码**：不在代码中写死 URL、端口、魔法数字；从配置读取（如通过已有 `CONFIG` 或注入的 config 对象）。
+
+## 模块化规范
+
+- **新增功能按模块划分**：新能力放在独立模块/包中，不在现有模块里堆砌无关代码。
+- **低耦合高内聚**：模块职责单一，通过清晰接口（函数/类）与配置交互；避免大而全的“上帝模块”。

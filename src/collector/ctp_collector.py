@@ -8,6 +8,7 @@ from src.collector.base_collector import BaseFuturesCollector
 from src.api.ctp_api import CtpMarketApi
 from src.processor.data_parser import DataParser
 from src.utils import futures_logger
+from src.utils.exceptions import DataParseError
 
 class CTPCollector(BaseFuturesCollector):
     """CTP 行情采集器"""
@@ -54,7 +55,7 @@ class CTPCollector(BaseFuturesCollector):
         queue_size = self.data_queue.qsize()
         
         if queue_size > 0:
-            futures_logger.info(f"从队列中采集数据，队列大小: {queue_size}")
+            futures_logger.debug(f"从队列中采集数据，队列大小: {queue_size}")
         else:
             # 即使队列为空，也偶尔打印一下状态（避免日志过多）
             import random
@@ -69,17 +70,17 @@ class CTPCollector(BaseFuturesCollector):
                 futures_logger.debug(f"从队列取出消息 {processed_count}，类型: {raw_msg.get('type', 'unknown')}")
                 std_data = DataParser.parse_raw_data(raw_msg)
                 if std_data:
-                    futures_logger.info(f"解析成功: {std_data.get('symbol', 'unknown')}, 价格: {std_data.get('last_price', 0)}")
+                    futures_logger.debug(f"解析成功: {std_data.get('symbol', 'unknown')}, 价格: {std_data.get('last_price', 0)}")
                     data_list.append(std_data)
-                else:
-                    futures_logger.warning(f"数据解析返回 None，原始消息类型: {raw_msg.get('type', 'unknown')}")
             except queue.Empty:
                 break
+            except DataParseError as e:
+                futures_logger.warning(f"数据解析失败，跳过本条: {e}")
             except Exception as e:
                 futures_logger.error(f"数据解析异常: {e}", exc_info=True)
         
         if processed_count > 0:
-            futures_logger.info(f"本次处理了 {processed_count} 条消息，成功解析 {len(data_list)} 条")
+            futures_logger.debug(f"本次处理了 {processed_count} 条消息，成功解析 {len(data_list)} 条")
         return data_list
 
     def close_connections(self) -> None:

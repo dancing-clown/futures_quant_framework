@@ -8,6 +8,7 @@ from src.collector.base_collector import BaseFuturesCollector
 from src.api.zy_zmq_api import ZYZmqApi
 from src.processor.data_parser import DataParser
 from src.utils import futures_logger
+from src.utils.exceptions import DataParseError
 
 class ZYZmqCollector(BaseFuturesCollector):
     """正瀛 ZMQ 行情采集器"""
@@ -17,7 +18,10 @@ class ZYZmqCollector(BaseFuturesCollector):
         zy_config = market_sources.get("zhengyi_zmq", {})
         self.api = ZYZmqApi(
             dce_address=zy_config.get("dce_address", ""),
-            czce_address=zy_config.get("czce_address", "")
+            czce_address=zy_config.get("czce_address", ""),
+            poll_timeout_ms=int(zy_config.get("poll_timeout_ms", 100)),
+            receive_sleep_interval=float(zy_config.get("receive_sleep_interval", 0.01)),
+            error_retry_interval=float(zy_config.get("error_retry_interval", 1.0)),
         )
         self.data_queue = queue.Queue()
 
@@ -41,6 +45,8 @@ class ZYZmqCollector(BaseFuturesCollector):
                     data_list.append(std_data)
             except queue.Empty:
                 break
+            except DataParseError as e:
+                futures_logger.warning(f"ZY 数据解析失败，跳过本条: {e}")
         return data_list
 
     def close_connections(self) -> None:

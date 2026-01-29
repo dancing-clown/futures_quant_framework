@@ -12,6 +12,7 @@ from src.collector.base_collector import BaseFuturesCollector
 from src.api.gfex_exanic_api import GfexExanicApi
 from src.processor.data_parser import DataParser
 from src.utils import futures_logger
+from src.utils.exceptions import DataParseError
 
 
 class GfexCollector(BaseFuturesCollector):
@@ -25,6 +26,7 @@ class GfexCollector(BaseFuturesCollector):
             port_number=int(cfg.get("port_number", 1)),
             buffer_number=int(cfg.get("buffer_number", 0)),
             pybind_path=cfg.get("pybind_path"),
+            frame_buffer_size=int(cfg.get("frame_buffer_size", 2048)),
         )
         self.data_queue: queue.Queue = queue.Queue()
 
@@ -48,6 +50,8 @@ class GfexCollector(BaseFuturesCollector):
                     data_list.append(std_data)
             except queue.Empty:
                 break
+            except DataParseError as e:
+                futures_logger.warning(f"GFEX 数据解析失败，跳过本条: {e}")
             except Exception as e:
                 futures_logger.error(f"GFEX 数据解析异常: {e}", exc_info=True)
         return data_list

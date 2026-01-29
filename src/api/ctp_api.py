@@ -9,8 +9,12 @@ from typing import Optional, Callable, List
 from src.utils import futures_logger
 
 
-def setup_ctp_path(custom_path: Optional[str] = None):
-    """根据配置/环境动态注入 pybind 搜索路径"""
+def setup_ctp_path(custom_path: Optional[str] = None) -> None:
+    """根据配置/环境动态注入 CTP pybind 搜索路径。
+
+    Args:
+        custom_path: 显式指定的 pybind 目录；未指定则从环境变量 CTP_PYBIND_PATH 读取。
+    """
     search_paths = []
     # 优先使用显式传入的路径
     if custom_path:
@@ -113,7 +117,7 @@ class CtpSpiWrapper:
                 thread_id = threading.current_thread().ident
                 instrument_id = getattr(pDepthMarketData, 'InstrumentID', '')
                 last_price = getattr(pDepthMarketData, 'LastPrice', 0.0)
-                futures_logger.info(f"收到行情数据: {instrument_id}, 最新价: {last_price}, 线程ID: {thread_id}")
+                futures_logger.debug(f"收到行情数据: {instrument_id}, 最新价: {last_price}, 线程ID: {thread_id}")
                 # 调用回调，将数据放入队列
                 self.callback({"type": "CTP_TICK", "data": pDepthMarketData})
                 futures_logger.debug(f"行情数据回调已调用，数据已放入队列: {instrument_id}")
@@ -133,9 +137,8 @@ class CtpSpiWrapper:
             futures_logger.warning("错误响应回调异常，pRspInfo 为空")
 
 class CtpMarketApi:
-    """
-    CTP 行情接口封装类
-    """
+    """CTP 行情接口封装类：连接、登录、订阅与行情回调。"""
+
     def __init__(self, front_address: str, flow_path: str, 
                  pybind_path: Optional[str] = None,
                  subscribe_symbols: Optional[List[str]] = None,
@@ -176,11 +179,15 @@ class CtpMarketApi:
         self.is_logged_in = False
         self._lock = threading.Lock()
 
-    def connect(self, callback: Callable, auto_subscribe: bool = True):
-        """连接并初始化 CTP
+    def connect(self, callback: Callable, auto_subscribe: bool = True) -> bool:
+        """连接并初始化 CTP 行情前置。
+
         Args:
-            callback: 行情数据回调函数
-            auto_subscribe: 是否在登录成功后自动订阅（默认 True）
+            callback: 行情数据回调函数，接收 {"type": "CTP_TICK", "data": ...}。
+            auto_subscribe: 是否在登录成功后自动订阅，默认 True。
+
+        Returns:
+            初始化成功返回 True，否则 False。
         """
         if not ctp_pybind:
             futures_logger.error("ctp_pybind 模块不可用，请先编译 ctp_pybind")
@@ -241,9 +248,13 @@ class CtpMarketApi:
             futures_logger.error(f"CTP 连接异常: {e}", exc_info=True)
             return False
 
-    def login(self):
-        """执行登录（通常在 OnFrontConnected 回调中自动调用）
-        如果未提供登录信息，则使用空字段（匿名登录）
+    def login(self) -> bool:
+        """发送登录请求（通常在 OnFrontConnected 回调中自动调用）。
+
+        未提供 broker_id/investor_id/password 时使用空字段（匿名登录）。
+
+        Returns:
+            请求发送成功返回 True，否则 False。
         """
         if not self.api:
             futures_logger.error("CTP API 未初始化，无法登录")
@@ -278,10 +289,14 @@ class CtpMarketApi:
             futures_logger.error(f"登录异常: {e}", exc_info=True)
             return False
 
-    def subscribe(self, symbols: Optional[List[str]] = None):
-        """订阅行情
+    def subscribe(self, symbols: Optional[List[str]] = None) -> bool:
+        """订阅行情。
+
         Args:
-            symbols: 要订阅的合约列表，如果为 None 则使用初始化时设置的列表
+            symbols: 要订阅的合约列表；为 None 时使用初始化时设置的列表。
+
+        Returns:
+            请求发送成功返回 True，否则 False。
         """
         if not self.api:
             futures_logger.error("CTP API 未初始化，无法订阅")
@@ -289,11 +304,11 @@ class CtpMarketApi:
         
         if not self.is_logged_in:
             futures_logger.warning("尚未登录成功，订阅请求将在登录成功后自动执行")
-            # 更新订阅列表，等待登录成功后自动订阅
+            # 更新订阅列表，等待登录成功后自动订阅（wrapper 持有引用）
             if symbols:
                 self.subscribe_symbols = symbols
-            if self.spi:
-                self.spi.subscribe_symbols = self.subscribe_symbols
+            if self.spi and hasattr(self.spi, "_w"):
+                self.spi._w.subscribe_symbols = self.subscribe_symbols
             return False
         
         symbols_to_subscribe = symbols or self.subscribe_symbols
@@ -313,8 +328,8 @@ class CtpMarketApi:
             futures_logger.error(f"订阅异常: {e}", exc_info=True)
             return False
 
-    def get_api_version(self):
-        """获取 API 版本"""
+    def get_api_version(self) -> Optional[str]:
+        """获取 CTP API 版本字符串，失败返回 None。"""
         if self.api:
             try:
                 return self.api.GetApiVersion()
@@ -323,8 +338,8 @@ class CtpMarketApi:
                 return None
         return None
 
-    def close(self):
-        """释放资源"""
+    def close(self) -> None:
+        """释放 CTP API 与 SPI 资源。"""
         with self._lock:
             if self.api:
                 try:

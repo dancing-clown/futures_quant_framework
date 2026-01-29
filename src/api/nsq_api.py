@@ -49,7 +49,7 @@ def _get_nsq_pybind(pybind_path: Optional[str] = None):
         futures_logger.debug("nsq_pybind 导入成功")
         return m
     except ImportError as e:
-        raise ImportError(
+        raise MarketSourceError(
             "未找到 nsq_pybind。请在 Linux 下编译 extern_libs/nsq_pybind，"
             "并通过 NSQ 配置项 pybind_path 或环境变量 NSQ_PYBIND_PATH "
             "将 build 目录加入 PYTHONPATH。"
@@ -89,11 +89,15 @@ class NsqMarketApi:
             )
 
     def connect(self, callback: Callable[[Dict[str, Any]], None]) -> bool:
-        """初始化连接并注册回调（Linux only）
+        """初始化连接并注册回调（Linux only）。
 
-        当前版本仅做平台校验与回调注册；
-        在 Linux 环境下，如果 nsq_pybind 可用，会尝试导入并打印调试日志，
-        为后续真实接入打基础。
+        当前版本仅做平台校验与回调注册；若 nsq_pybind 可用则尝试导入并打调试日志。
+
+        Args:
+            callback: 行情数据回调，接收 {"type": "NSQ_DEPTH", "data": ...}。
+
+        Returns:
+            始终返回 True（stub 模式）。
         """
         self._ensure_linux()
         self._callback = callback

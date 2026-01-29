@@ -23,7 +23,7 @@ import yaml
 import asyncio
 import argparse
 import signal
-from src.utils import futures_logger, MarketSourceError
+from src.utils import futures_logger, MarketSourceError, DataCleanError, StorageError
 from src.collector.async_collector import AsyncFuturesCollector
 from src.processor.data_cleaner import DataCleaner
 from src.storage.file_storage import FileStorage
@@ -34,13 +34,16 @@ CONFIG_FILE = Path(__file__).parent / "config" / "main_config.yaml"
 _collector_instance = None
 
 def load_config(config_file: Path = None) -> dict:
-    """加载主配置文件
-    
+    """加载主配置文件。
+
     Args:
-        config_file: 配置文件路径，默认为 src/config/main_config.yaml
-        
+        config_file: 配置文件路径，默认为 src/config/main_config.yaml。
+
     Returns:
-        配置字典
+        解析后的配置字典。
+
+    Raises:
+        SystemExit: 文件不存在或 YAML 解析失败时退出码 1。
     """
     config_path = config_file or CONFIG_FILE
     try:
@@ -57,20 +60,30 @@ def load_config(config_file: Path = None) -> dict:
         raise SystemExit(1)
 
 async def process_data_callback(data_list, cleaner, storage):
-    """数据处理回调"""
+    """数据处理回调：清洗后写入存储。
+
+    Args:
+        data_list: 标准化行情列表。
+        cleaner: DataCleaner 实例。
+        storage: FileStorage 实例。
+    """
     try:
         cleaned_data = cleaner.clean(data_list)
         if cleaned_data:
-            futures_logger.info(f"处理 {len(cleaned_data)} 条清洗后的数据")
+            futures_logger.debug(f"处理 {len(cleaned_data)} 条清洗后的数据")
             storage.save(cleaned_data)
+    except DataCleanError as e:
+        futures_logger.warning(f"数据清洗异常，跳过本批: {e}")
+    except StorageError as e:
+        futures_logger.error(f"存储写入失败: {e}", exc_info=True)
     except Exception as e:
         futures_logger.error(f"数据处理回调异常: {e}", exc_info=True)
 
-async def main_async(config_file: Path = None):
-    """异步主循环
-    
+async def main_async(config_file: Path = None) -> None:
+    """异步主循环：加载配置、初始化采集/清洗/存储并进入分发循环。
+
     Args:
-        config_file: 配置文件路径，用于集成测试时指定不同配置
+        config_file: 配置文件路径，用于集成测试时指定不同配置；默认使用 main_config.yaml。
     """
     global _collector_instance
     
@@ -83,10 +96,12 @@ async def main_async(config_file: Path = None):
                       if source.get("enable", False)]
     futures_logger.info(f"启用的行情源: {', '.join(enabled_sources) if enabled_sources else '无'}")
     
-    collector = AsyncFuturesCollector(market_sources)
+    collector = AsyncFuturesCollector(market_sources, config.get("collect"))
     _collector_instance = collector  # 设置全局实例供信号处理器使用
-    cleaner = DataCleaner()
-    storage = FileStorage()
+    processor_config = config.get("processor", {})
+    cleaner = DataCleaner(processor_config.get("clean", {}))
+    storage_config = config.get("storage", {}).get("file", {})
+    storage = FileStorage(base_path=storage_config.get("base_path", "data/market_data"))
     
     try:
         if collector.init_connections():
@@ -123,8 +138,8 @@ async def main_async(config_file: Path = None):
         collector.close_connections()
         futures_logger.info("程序已退出，资源已释放")
 
-def signal_handler(sig, frame):
-    """信号处理器，用于优雅退出"""
+def signal_handler(sig, frame) -> None:
+    """信号处理器：收到 SIGINT/SIGTERM 时停止采集并关闭连接。"""
     global _collector_instance
     futures_logger.info("\n收到退出信号 (Ctrl+C)，正在关闭连接...")
     if _collector_instance:

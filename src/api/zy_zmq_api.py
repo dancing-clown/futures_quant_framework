@@ -121,17 +121,32 @@ class CZCEL2_LevelQuotation(ctypes.Structure):
     ]
 
 class ZYZmqApi:
-    """正瀛 ZMQ 行情接口类"""
-    def __init__(self, dce_address: str = "", czce_address: str = ""):
+    """正瀛 ZMQ 行情接口类。"""
+
+    def __init__(
+        self,
+        dce_address: str = "",
+        czce_address: str = "",
+        poll_timeout_ms: int = 100,
+        receive_sleep_interval: float = 0.01,
+        error_retry_interval: float = 1.0,
+    ):
         self.dce_address = dce_address
         self.czce_address = czce_address
+        self.poll_timeout_ms = poll_timeout_ms
+        self.receive_sleep_interval = receive_sleep_interval
+        self.error_retry_interval = error_retry_interval
         self.context = zmq.Context()
         self.dce_sub = None
         self.czce_sub = None
         self.is_running = False
 
-    def connect(self):
-        """连接 ZMQ 地址"""
+    def connect(self) -> bool:
+        """连接大商所/郑商所 ZMQ 地址并订阅全量。
+
+        Returns:
+            连接成功返回 True，否则 False。
+        """
         try:
             if self.dce_address:
                 self.dce_sub = self.context.socket(zmq.SUB)
@@ -151,8 +166,8 @@ class ZYZmqApi:
             futures_logger.error(f"ZMQ 连接失败: {e}")
             return False
 
-    def close(self):
-        """关闭连接"""
+    def close(self) -> None:
+        """关闭 ZMQ socket 并销毁 context。"""
         self.is_running = False
         if self.dce_sub:
             self.dce_sub.close()
@@ -161,8 +176,8 @@ class ZYZmqApi:
         self.context.term()
         futures_logger.info("ZMQ 连接已关闭")
 
-    async def start_receiving(self, callback: Callable):
-        """异步开始接收数据"""
+    async def start_receiving(self, callback: Callable) -> None:
+        """异步开始接收 DCE/CZCE 行情并调用 callback。"""
         if not self.is_running:
             futures_logger.error("API 未连接，无法接收数据")
             return
@@ -175,25 +190,24 @@ class ZYZmqApi:
         
         await asyncio.gather(*tasks)
 
-    async def _receive_loop(self, socket, exchange, callback):
-        """内部接收循环"""
+    async def _receive_loop(self, socket, exchange, callback) -> None:
+        """单交易所接收循环：轮询 socket，解析后回调。"""
         futures_logger.info(f"开始接收 {exchange} 行情...")
         while self.is_running:
             try:
-                # 非阻塞尝试接收
-                if socket.poll(timeout=100):
+                if socket.poll(timeout=self.poll_timeout_ms):
                     data = socket.recv()
                     parsed_data = self._parse_raw_data(data, exchange)
                     if parsed_data:
                         callback(parsed_data)
                 else:
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(self.receive_sleep_interval)
             except Exception as e:
                 futures_logger.error(f"{exchange} 接收循环异常: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.error_retry_interval)
 
     def _parse_raw_data(self, data: bytes, exchange: str) -> Optional[dict]:
-        """解析原始字节数据"""
+        """解析 DCE/CZCE 原始字节为统一结构（含 type、data）。"""
         try:
             if exchange == "DCE":
                 if len(data) == ctypes.sizeof(DCEL1_Quotation):
