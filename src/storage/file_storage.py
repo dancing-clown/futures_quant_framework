@@ -38,6 +38,6 @@ class FileStorage:
                     save_data['datetime'] = data['datetime'].isoformat()
                     writer.writerow(save_data)
                 
-                futures_logger.debug(f"已保存数据: {symbol} {date_str}")
+                futures_logger.info(f"已保存数据到: {file_path} - {symbol}, 价格: {data.get('last_price', 0)}")
             except Exception as e:
                 futures_logger.error(f"保存数据失败: {e}", exc_info=True)

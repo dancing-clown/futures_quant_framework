@@ -20,16 +20,25 @@ class DataParser:
     @staticmethod
     def parse_raw_data(raw_msg: Dict) -> Optional[Dict]:
         """解析原始数据，自动识别源类型"""
-        msg_type = raw_msg.get("type")
-        obj = raw_msg.get("data")
-        
-        if msg_type == "DCE_L1":
-            return DataParser._parse_dce_l1(obj)
-        elif msg_type == "CZCE_L1":
-            return DataParser._parse_czce_l1(obj)
-        elif msg_type == "CTP_TICK":
-            return DataParser._parse_ctp_tick(obj)
-        return None
+        try:
+            msg_type = raw_msg.get("type")
+            obj = raw_msg.get("data")
+            
+            if not obj:
+                return None
+            
+            if msg_type == "DCE_L1":
+                return DataParser._parse_dce_l1(obj)
+            elif msg_type == "CZCE_L1":
+                return DataParser._parse_czce_l1(obj)
+            elif msg_type == "CTP_TICK":
+                # CTP 类型可能为 None（如果 ctp_pybind 未加载），但对象存在就可以解析
+                return DataParser._parse_ctp_tick(obj)
+            return None
+        except Exception as e:
+            from src.utils import futures_logger
+            futures_logger.error(f"数据解析异常: {e}", exc_info=True)
+            return None
 
     @staticmethod
     def _parse_dce_l1(obj: DCEL1_Quotation) -> Dict:
@@ -86,44 +95,52 @@ class DataParser:
         }
 
     @staticmethod
-    def _parse_ctp_tick(obj: CThostFtdcDepthMarketDataField) -> Dict:
+    def _parse_ctp_tick(obj) -> Dict:
         """解析 CTP Tick
         注意：pybind11 绑定的字符串属性已经是 Python str 类型，不需要 decode
         """
-        # pybind11 返回的是 std::string，已经是 Python str，不需要 decode
-        symbol = str(obj.InstrumentID).strip() if obj.InstrumentID else ""
-        # CTP UpdateTime: HH:MM:SS, UpdateMillisec: 500
-        time_str = str(obj.UpdateTime) if obj.UpdateTime else "00:00:00"
-        date_str = str(obj.ActionDay) if obj.ActionDay else ""  # 业务日期
-        ms = int(obj.UpdateMillisec) if hasattr(obj, 'UpdateMillisec') else 0
+        from src.utils import futures_logger
         
-        # 解析时间
         try:
-            if date_str and time_str:
-                dt = datetime.datetime.strptime(f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f")
-            else:
-                # 如果时间信息不完整，使用当前时间
+            # pybind11 返回的是 std::string，已经是 Python str，不需要 decode
+            symbol = str(obj.InstrumentID).strip() if hasattr(obj, 'InstrumentID') and obj.InstrumentID else ""
+            # CTP UpdateTime: HH:MM:SS, UpdateMillisec: 500
+            time_str = str(obj.UpdateTime) if hasattr(obj, 'UpdateTime') and obj.UpdateTime else "00:00:00"
+            date_str = str(obj.ActionDay) if hasattr(obj, 'ActionDay') and obj.ActionDay else ""  # 业务日期
+            ms = int(obj.UpdateMillisec) if hasattr(obj, 'UpdateMillisec') else 0
+            
+            # 解析时间
+            try:
+                if date_str and time_str and len(date_str) == 8:
+                    dt = datetime.datetime.strptime(f"{date_str} {time_str}.{ms:03d}", "%Y%m%d %H:%M:%S.%f")
+                else:
+                    # 如果时间信息不完整，使用当前时间
+                    dt = datetime.datetime.now()
+            except (ValueError, AttributeError) as e:
+                # 时间解析失败，使用当前时间
+                futures_logger.warning(f"时间解析失败，使用当前时间: {e}")
                 dt = datetime.datetime.now()
-        except (ValueError, AttributeError) as e:
-            # 时间解析失败，使用当前时间
-            dt = datetime.datetime.now()
-        
-        exchange = str(obj.ExchangeID).strip() if obj.ExchangeID else ""
-        
-        return {
-            "symbol": symbol,
-            "exchange": exchange,
-            "last_price": float(obj.LastPrice) if obj.LastPrice else 0.0,
-            "volume": int(obj.Volume) if obj.Volume else 0,
-            "open_interest": float(obj.OpenInterest) if obj.OpenInterest else 0.0,
-            "datetime": dt,
-            "bid_price_1": float(obj.BidPrice1) if obj.BidPrice1 else 0.0,
-            "bid_volume_1": int(obj.BidVolume1) if obj.BidVolume1 else 0,
-            "ask_price_1": float(obj.AskPrice1) if obj.AskPrice1 else 0.0,
-            "ask_volume_1": int(obj.AskVolume1) if obj.AskVolume1 else 0,
-            "open_price": float(obj.OpenPrice) if obj.OpenPrice else 0.0,
-            "high_price": float(obj.HighestPrice) if obj.HighestPrice else 0.0,
-            "low_price": float(obj.LowestPrice) if obj.LowestPrice else 0.0,
-            "pre_close": float(obj.PreClosePrice) if obj.PreClosePrice else 0.0,
-            "pre_settlement": float(obj.PreSettlementPrice) if obj.PreSettlementPrice else 0.0
-        }
+            
+            exchange = str(obj.ExchangeID).strip() if hasattr(obj, 'ExchangeID') and obj.ExchangeID else ""
+            
+            result = {
+                "symbol": symbol,
+                "exchange": exchange,
+                "last_price": float(obj.LastPrice) if hasattr(obj, 'LastPrice') and obj.LastPrice else 0.0,
+                "volume": int(obj.Volume) if hasattr(obj, 'Volume') and obj.Volume else 0,
+                "open_interest": float(obj.OpenInterest) if hasattr(obj, 'OpenInterest') and obj.OpenInterest else 0.0,
+                "datetime": dt,
+                "bid_price_1": float(obj.BidPrice1) if hasattr(obj, 'BidPrice1') and obj.BidPrice1 else 0.0,
+                "bid_volume_1": int(obj.BidVolume1) if hasattr(obj, 'BidVolume1') and obj.BidVolume1 else 0,
+                "ask_price_1": float(obj.AskPrice1) if hasattr(obj, 'AskPrice1') and obj.AskPrice1 else 0.0,
+                "ask_volume_1": int(obj.AskVolume1) if hasattr(obj, 'AskVolume1') and obj.AskVolume1 else 0,
+                "open_price": float(obj.OpenPrice) if hasattr(obj, 'OpenPrice') and obj.OpenPrice else 0.0,
+                "high_price": float(obj.HighestPrice) if hasattr(obj, 'HighestPrice') and obj.HighestPrice else 0.0,
+                "low_price": float(obj.LowestPrice) if hasattr(obj, 'LowestPrice') and obj.LowestPrice else 0.0,
+                "pre_close": float(obj.PreClosePrice) if hasattr(obj, 'PreClosePrice') and obj.PreClosePrice else 0.0,
+                "pre_settlement": float(obj.PreSettlementPrice) if hasattr(obj, 'PreSettlementPrice') and obj.PreSettlementPrice else 0.0
+            }
+            return result
+        except Exception as e:
+            futures_logger.error(f"解析 CTP Tick 异常: {e}", exc_info=True)
+            return None

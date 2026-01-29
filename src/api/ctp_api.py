@@ -91,6 +91,8 @@ class CtpSpiWrapper(BaseSpi):
                 if symbols_to_subscribe:
                     futures_logger.info(f"开始订阅行情: {symbols_to_subscribe}")
                     self.api_instance.subscribe(symbols_to_subscribe)
+                else:
+                    futures_logger.warning("订阅列表为空，无法自动订阅")
         else:
             error_msg = pRspInfo.ErrorMsg if pRspInfo else "Unknown Error"
             error_id = pRspInfo.ErrorID if pRspInfo else -1
@@ -115,12 +117,18 @@ class CtpSpiWrapper(BaseSpi):
         """行情数据推送回调"""
         if self.callback and pDepthMarketData:
             try:
+                import threading
+                thread_id = threading.current_thread().ident
                 instrument_id = getattr(pDepthMarketData, 'InstrumentID', '')
                 last_price = getattr(pDepthMarketData, 'LastPrice', 0.0)
-                futures_logger.info(f"收到行情数据: {instrument_id}, 最新价: {last_price}")
+                futures_logger.info(f"收到行情数据: {instrument_id}, 最新价: {last_price}, 线程ID: {thread_id}")
+                # 调用回调，将数据放入队列
                 self.callback({"type": "CTP_TICK", "data": pDepthMarketData})
+                futures_logger.debug(f"行情数据回调已调用，数据已放入队列: {instrument_id}")
             except Exception as e:
                 futures_logger.error(f"处理行情数据回调异常: {e}", exc_info=True)
+        else:
+            futures_logger.warning("行情数据推送回调异常，callback 或 pDepthMarketData 为空")
 
     def OnRspError(self, pRspInfo, nRequestID, bIsLast):
         """错误响应回调"""
@@ -129,12 +137,14 @@ class CtpSpiWrapper(BaseSpi):
                 f"CTP 响应错误 - ErrorID: {pRspInfo.ErrorID}, "
                 f"ErrorMsg: {pRspInfo.ErrorMsg}, RequestID: {nRequestID}"
             )
+        else:
+            futures_logger.warning("错误响应回调异常，pRspInfo 为空")
 
 class CtpMarketApi:
     """
     CTP 行情接口封装类
     """
-    def __init__(self, front_address: str, flow_path: str = "./flow/", 
+    def __init__(self, front_address: str, flow_path: str, 
                  pybind_path: Optional[str] = None,
                  subscribe_symbols: Optional[List[str]] = None,
                  broker_id: Optional[str] = None,
@@ -171,7 +181,7 @@ class CtpMarketApi:
         """连接并初始化 CTP
         Args:
             callback: 行情数据回调函数
-            auto_subscribe: 是否在登录成功后自动订阅（默认 True，参考 Rust 版本）
+            auto_subscribe: 是否在登录成功后自动订阅（默认 True）
         """
         if not ctp_pybind:
             futures_logger.error("ctp_pybind 模块不可用，请先编译 ctp_pybind")
@@ -183,13 +193,19 @@ class CtpMarketApi:
             
             # 设置订阅列表（在登录成功后会使用）
             if auto_subscribe:
-                self.spi.subscribe_symbols = self.subscribe_symbols
+                self.spi.subscribe_symbols = self.subscribe_symbols.copy() if self.subscribe_symbols else []
+                futures_logger.debug(f"设置自动订阅列表: {self.spi.subscribe_symbols}")
             
             self.api.RegisterSpi(self.spi)
+            futures_logger.debug(f"注册 SPI")
+            futures_logger.debug(f"注册前台地址: {self.front_address}")
             self.api.RegisterFront(self.front_address)
+            futures_logger.debug(f"注册前台地址完成: {self.front_address}")
             self.api.Init()
+            futures_logger.debug(f"初始化 API")
             
             futures_logger.info(f"CTP API 已初始化，正在连接: {self.front_address}")
+            futures_logger.info(f"订阅列表: {self.subscribe_symbols}")
             self.is_connected = True
             return True
         except Exception as e:
@@ -267,16 +283,6 @@ class CtpMarketApi:
         except Exception as e:
             futures_logger.error(f"订阅异常: {e}", exc_info=True)
             return False
-
-    def join(self):
-        """阻塞等待，保持连接（参考 Rust 版本的 Join 调用）"""
-        if self.api:
-            try:
-                return self.api.Join()
-            except Exception as e:
-                futures_logger.error(f"Join 异常: {e}")
-                return -1
-        return -1
 
     def get_api_version(self):
         """获取 API 版本"""

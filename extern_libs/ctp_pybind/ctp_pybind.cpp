@@ -165,7 +165,6 @@ PYBIND11_MODULE(ctp_pybind, m) {
         .def("RegisterSpi", &PyMdApi::RegisterSpi)
         .def("RegisterFront", &PyMdApi::RegisterFront)
         .def("Init", &PyMdApi::Init)
-        .def("Join", &PyMdApi::Join)
         .def("ReqUserLogin", &PyMdApi::ReqUserLogin)
         .def("SubscribeMarketData", &PyMdApi::SubscribeMarketData)
         .def("GetApiVersion", &PyMdApi::GetApiVersion);

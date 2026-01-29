@@ -14,7 +14,7 @@ class ZYZmqCollector(BaseFuturesCollector):
     
     def __init__(self, market_sources: Dict):
         super().__init__(market_sources)
-        zy_config = market_sources.get("ZY_ZMQ", {})
+        zy_config = market_sources.get("zhengyi_zmq", {})
         self.api = ZYZmqApi(
             dce_address=zy_config.get("dce_address", ""),
             czce_address=zy_config.get("czce_address", "")

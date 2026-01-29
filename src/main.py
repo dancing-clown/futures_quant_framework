@@ -22,12 +22,16 @@ if str(_project_root) not in sys.path:
 import yaml
 import asyncio
 import argparse
+import signal
 from src.utils import futures_logger, MarketSourceError
 from src.collector.async_collector import AsyncFuturesCollector
 from src.processor.data_cleaner import DataCleaner
 from src.storage.file_storage import FileStorage
 
 CONFIG_FILE = Path(__file__).parent / "config" / "main_config.yaml"
+
+# 全局采集器实例，用于信号处理
+_collector_instance = None
 
 def load_config(config_file: Path = None) -> dict:
     """加载主配置文件
@@ -54,9 +58,13 @@ def load_config(config_file: Path = None) -> dict:
 
 async def process_data_callback(data_list, cleaner, storage):
     """数据处理回调"""
-    cleaned_data = cleaner.clean(data_list)
-    if cleaned_data:
-        storage.save(cleaned_data)
+    try:
+        cleaned_data = cleaner.clean(data_list)
+        if cleaned_data:
+            futures_logger.info(f"处理 {len(cleaned_data)} 条清洗后的数据")
+            storage.save(cleaned_data)
+    except Exception as e:
+        futures_logger.error(f"数据处理回调异常: {e}", exc_info=True)
 
 async def main_async(config_file: Path = None):
     """异步主循环
@@ -64,6 +72,8 @@ async def main_async(config_file: Path = None):
     Args:
         config_file: 配置文件路径，用于集成测试时指定不同配置
     """
+    global _collector_instance
+    
     config = load_config(config_file)
     
     market_sources = config["market_sources"]
@@ -74,6 +84,7 @@ async def main_async(config_file: Path = None):
     futures_logger.info(f"启用的行情源: {', '.join(enabled_sources) if enabled_sources else '无'}")
     
     collector = AsyncFuturesCollector(market_sources)
+    _collector_instance = collector  # 设置全局实例供信号处理器使用
     cleaner = DataCleaner()
     storage = FileStorage()
     
@@ -88,9 +99,20 @@ async def main_async(config_file: Path = None):
             
             futures_logger.info("系统初始化完成，进入主运行循环...")
             futures_logger.info("按 Ctrl+C 退出程序")
-            await collector.run_forever(
-                lambda d: process_data_callback(d, cleaner, storage)
-            )
+            
+            # 创建数据处理回调函数
+            # 这个回调函数会被 dispatch_loop 定期调用，处理从队列中采集的数据
+            async def data_callback(data_list):
+                try:
+                    futures_logger.debug(f"数据回调被调用，收到 {len(data_list)} 条数据")
+                    await process_data_callback(data_list, cleaner, storage)
+                except Exception as e:
+                    futures_logger.error(f"数据回调处理异常: {e}", exc_info=True)
+            
+            # 启动主循环，这会启动 dispatch_loop 来定期从队列中取数据
+            futures_logger.info("正在启动数据采集和分发循环...")
+            await collector.run_forever(data_callback)
+            futures_logger.info("数据采集和分发循环已退出")
         else:
             futures_logger.error("系统初始化失败，请检查配置和网络连接")
     except KeyboardInterrupt:
@@ -101,7 +123,21 @@ async def main_async(config_file: Path = None):
         collector.close_connections()
         futures_logger.info("程序已退出，资源已释放")
 
+def signal_handler(sig, frame):
+    """信号处理器，用于优雅退出"""
+    global _collector_instance
+    futures_logger.info("\n收到退出信号 (Ctrl+C)，正在关闭连接...")
+    if _collector_instance:
+        _collector_instance.stop()
+        _collector_instance.close_connections()
+    import sys
+    sys.exit(0)
+
 if __name__ == "__main__":
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     parser = argparse.ArgumentParser(description='期货行情多源整合框架 - 集成测试')
     parser.add_argument(
         '-c', '--config',
@@ -115,4 +151,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main_async(config_file))
     except KeyboardInterrupt:
+        pass
+    except SystemExit:
         pass

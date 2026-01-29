@@ -15,6 +15,105 @@
 5. **工程化设计**：面向接口编程、自定义业务异常、全链路日志、上下文管理器，保证代码可维护性和鲁棒性；
 6. **易扩展**：模块化分层设计，新增功能/行情源/存储方案无需修改原有代码，仅需实现对应接口。
 
+## 框架设计：模块交互流程图
+
+### 模块方框图
+
+下图展示各模块的层次关系与依赖方向（配置 → 入口 → 采集/处理/存储）。
+
+```mermaid
+flowchart TB
+    subgraph 配置层
+        Config[config/main_config.yaml]
+    end
+
+    subgraph 入口
+        Main[main.py]
+    end
+
+    subgraph 采集层
+        AsyncCollector[AsyncFuturesCollector]
+        CTPCollector[CTPCollector]
+        ZYCollector[ZYZmqCollector]
+        AsyncCollector --> CTPCollector
+        AsyncCollector --> ZYCollector
+    end
+
+    subgraph 接口层["api/"]
+        CtpApi[CtpMarketApi]
+        ZyApi[ZYZmqApi]
+    end
+
+    subgraph 处理层["processor/"]
+        Parser[DataParser]
+        Cleaner[DataCleaner]
+    end
+
+    subgraph 存储层["storage/"]
+        FileStorage[FileStorage]
+    end
+
+    subgraph 外部行情源
+        CTP(CTP 前置)
+        ZMQ(正瀛 ZMQ)
+    end
+
+    Config --> Main
+    Main --> AsyncCollector
+    Main --> Cleaner
+    Main --> FileStorage
+    CTPCollector --> CtpApi
+    ZYCollector --> ZyApi
+    CTPCollector --> Parser
+    ZYCollector --> Parser
+    CtpApi <--> CTP
+    ZyApi <--> ZMQ
+    AsyncCollector -.->|标准化数据| Cleaner
+    Cleaner -.->|清洗后数据| FileStorage
+```
+
+### 数据流与运行时流程
+
+从行情源到落盘的整体数据流与调用关系如下。
+
+```mermaid
+flowchart LR
+    subgraph 行情接入
+        A1[CTP 前置]
+        A2[正瀛 ZMQ]
+    end
+
+    subgraph 采集与解析
+        B1[CTP API 回调/队列]
+        B2[ZY API 异步接收]
+        B3[DataParser 标准化]
+    end
+
+    subgraph 调度与处理
+        C1[dispatch_loop 汇总]
+        C2[DataCleaner 去重/校验]
+    end
+
+    subgraph 输出
+        D1[FileStorage 按日按合约 CSV]
+    end
+
+    A1 --> B1
+    A2 --> B2
+    B1 --> B3
+    B2 --> B3
+    B3 --> C1
+    C1 --> C2
+    C2 --> D1
+```
+
+**流程简述**：
+
+1. **main.py** 加载配置，创建 `AsyncFuturesCollector`、`DataCleaner`、`FileStorage`，并完成连接初始化与订阅。
+2. **采集层**：CTP 通过回调写入队列，正瀛通过 ZMQ 异步接收；各子采集器在 `collect_data()` 中从队列取原始数据，经 **DataParser** 转为统一格式。
+3. **AsyncFuturesCollector** 的 `dispatch_loop` 定期汇总各采集器数据，调用 **data_callback**，将标准化数据交给 **DataCleaner** 清洗。
+4. 清洗后的数据由 **FileStorage** 按合约、按日写入 `data/market_data/` 下的 CSV 文件。
+
 ## 环境搭建
 
 ### 基础环境
@@ -191,18 +290,56 @@ futures_quant_framework/
 
 ### 单元测试
 
-项目使用 `pytest` 进行单元测试，测试文件位于 `tests/` 目录：
+项目使用 `pytest` 进行单元测试，测试文件位于 `tests/` 目录。运行前请确保在**项目根目录**下，且已安装依赖（`pip install -r requirements.txt`，其中包含 `pytest`）；推荐在虚拟环境中执行。
+
+#### 如何运行单元测试
 
 ```bash
+# 进入项目根目录
+cd /path/to/futures_quant_framework
+
+# 建议先激活虚拟环境（若使用）
+# source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate     # Windows
+
 # 运行所有单元测试
 pytest tests/
 
-# 运行特定测试文件
+# 带详细输出
+pytest tests/ -v
+
+# 运行指定测试文件
+pytest tests/test_data_parser.py
 pytest tests/test_ctp_api.py
 
-# 运行特定测试用例
-pytest tests/test_ctp_api.py::test_ctp_api_initialization
+# 运行指定测试类或用例
+pytest tests/test_data_cleaner.py::TestDataCleaner::test_clean_deduplication
+pytest tests/test_ctp_api.py::TestCtpMarketApi::test_api_initialization_with_anonymous_login
+
+# 仅运行匹配名称的用例（-k）
+pytest tests/ -k "parser" -v
+
+# 失败时进入调试（--pdb）
+pytest tests/ --pdb
 ```
+
+#### 各模块对应测试文件
+
+| 模块 | 测试文件 | 说明 |
+|------|----------|------|
+| 配置加载 | `test_config.py` | `load_config` 默认/自定义路径、文件不存在 |
+| 数据解析 | `test_data_parser.py` | `DataParser.parse_raw_data`、CTP/DCE/CZCE 解析、`FUTURES_BASE_FIELDS` |
+| 数据清洗 | `test_data_cleaner.py` | `DataCleaner.clean` 去重、过滤无 `last_price`、多合约 |
+| 文件存储 | `test_file_storage.py` | `FileStorage.save` 空列表、目录创建、CSV 内容与追加 |
+| 工具与异常 | `test_utils.py` | 异常类继承与消息、`dt2timestamp`/`timestamp2dt`、`parse_futures_code`、`check_data_validity` |
+| 采集基类 | `test_base_collector.py` | `BaseFuturesCollector` 启用行情源校验、上下文管理器 |
+| 异步采集器 | `test_async_collector.py` | `AsyncFuturesCollector` 初始化、连接、汇总数据、停止 |
+| CTP 采集器 | `test_ctp_collector.py` | `CTPCollector` 队列回调、`collect_data`、`DataParser` 配合、关闭 |
+| 正瀛 ZMQ 采集器 | `test_zy_collector.py` | `ZYZmqCollector` 队列、`collect_data`、订阅 |
+| CTP API | `test_ctp_api.py` | `CtpMarketApi`/`CtpSpiWrapper` 连接、登录、订阅、回调（需与当前 CTP API 接口一致） |
+| 正瀛 ZMQ API | `test_zy_zmq_api.py` | `ZYZmqApi` 初始化、connect/close、`_parse_raw_data` DCE/CZCE |
+
+共享配置（如项目根路径加入 `sys.path`）在 `tests/conftest.py` 中统一处理，无需在各测试文件中重复添加。
 
 ### 集成测试
 
@@ -224,9 +361,9 @@ pytest tests/test_ctp_api.py::test_ctp_api_initialization
 |通用工具模块|src/utils/|日志/异常/时间处理/通用函数|
 |项目入口|src/main.py|配置加载/模块调度/程序启动|
 
-## 框架后续扩展指南（快速实现具体课题）
+## 框架后续扩展指南
 
-以上框架为**完整可运行的核心骨架**，以下是核心课题的快速扩展路径：
+以上框架为**完整可运行的核心骨架**，以下是模块快速扩展方式简介
 
 ### 期货行情多源整合采集与实时处理系统
 
@@ -234,7 +371,7 @@ pytest tests/test_ctp_api.py::test_ctp_api_initialization
 2. 实现`src/collector/async_collector.py`（继承`BaseFuturesCollector`，实现异步采集的4个抽象方法）；
 3. 实现`src/processor/data_parser.py`（多源行情数据标准化解析，转换为`FUTURES_BASE_FIELDS`格式）；
 4. 实现`src/processor/data_cleaner.py`（基础清洗：去重、时间戳校准、字段补全）；
-5. 实现`src/storage/`下任意一种存储方案（如`file_storage.py`，实现行情数据本地保存）。
+5. 实现`src/storage/`下任意一种存储方案（如`file_storage.py`，实现行情数据本地保存，或者共享内存方式）。
 
 ### 期货行情时间序列异常检测与质量校验引擎
 
@@ -243,14 +380,6 @@ pytest tests/test_ctp_api.py::test_ctp_api_initialization
 3. 新增具体异常检测器（如`JumpDetector`跳空检测、`TimeOrderDetector`时间戳乱序检测），继承基类实现检测逻辑；
 4. 在`src/main.py`中添加**异常检测调度逻辑**（采集数据后调用检测器，异常数据存入`data/anomaly/`）；
 5. 新增可视化功能（在`src/`下新增`visual/`模块，实现异常结果可视化）。
-
-### CTP/广发期货行情接口封装与通用Python SDK
-
-1. 完善`src/api/`下**CTP/广发/正瀛**的接口封装，实现所有核心功能（行情订阅、历史数据查询、合约信息获取、主力合约查询等）；
-2. 在`src/api/`下新增`__init__.py`，统一导出所有接口的核心类/方法，实现SDK化调用；
-3. 在`docs/`下新增`api_docs.md`，编写详细的SDK使用文档（含接口说明、入参出参、调用示例）；
-4. 在`tests/`下新增`test_api.py`，编写单元测试用例，覆盖所有接口的正常/异常场景；
-5. 在项目根目录新增`examples/`目录，编写SDK调用示例（如行情订阅示例、历史数据查询示例）。
 
 ## 框架运行注意事项
 
